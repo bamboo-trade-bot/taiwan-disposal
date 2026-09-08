@@ -17,7 +17,7 @@ PLACEHOLDER = "/*__DATA__*/"
 # 頁面實際用到的欄位；其餘（原始欄位、收盤價、本益比）不進頁面以縮小檔案
 KEEP = ["market", "announce_date", "code", "name", "type", "reason", "round",
         "interval_min", "days", "start", "end", "active", "upcoming",
-        "cumulative", "detail"]
+        "cumulative", "prepay", "prepay_note", "detail"]
 DETAIL_CHARS = 180
 
 

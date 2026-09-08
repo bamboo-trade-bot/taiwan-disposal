@@ -141,12 +141,20 @@ td.dt { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); whit
 .pill.live { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .pill.soon { border-style: dashed; }
 .pill.r2 { border-color: var(--ink-2); color: var(--ink); font-weight: 600; }
+/* 全面預收＝所有委託一律圈存，是當沖最直接的限制，給它最強的視覺重量 */
+.pill.pay-all { background: var(--accent); border-color: var(--accent); color: var(--panel); font-weight: 600; }
+.pill.pay-cond { border-style: dotted; }
 
-/* remaining-days bar: length encodes elapsed share of the disposal window */
-.prog { display: flex; align-items: center; gap: 9px; min-width: 132px; }
-.prog .track { flex: 1; height: 5px; border-radius: 3px; background: var(--rule); overflow: hidden; }
-.prog .fill { height: 100%; background: var(--accent); border-radius: 3px; }
-.prog .lab { font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+.toggle input { accent-color: var(--accent); }
+
+.rel { display: flex; flex-direction: column; gap: 3px; min-width: 148px; }
+.rel .top { display: flex; align-items: center; gap: 9px; }
+.rel .track { flex: 1; height: 5px; border-radius: 3px; background: var(--rule); overflow: hidden; min-width: 54px; }
+.rel .fill { height: 100%; background: var(--accent); border-radius: 3px; }
+.rel .lab { font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.rel .out { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+.rel.last .lab { color: var(--accent); font-weight: 600; }
 
 /* ---------- regime-change panel ---------- */
 .regime { border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 4px; background: var(--panel); padding: 22px 24px; box-shadow: var(--shadow); }
@@ -236,19 +244,32 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
 
     <div class="sec-head" style="margin-top:26px">
       <h2 style="font-size:17px">處置中與即將開始的標的</h2>
-      <p>依處置結束日排序。剩餘進度條以日曆日計算。</p>
+      <p>依解除日排序。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。</p>
+      <label class="toggle"><input type="checkbox" id="show-derivs"> 一併顯示權證與可轉債</label>
     </div>
     <div class="tablewrap">
       <table id="live-table">
         <thead>
           <tr>
             <th>市場</th><th>代號</th><th>名稱</th><th>類型</th>
-            <th>處置原因</th><th>層級</th><th class="num">撮合</th>
-            <th>處置期間</th><th>剩餘</th>
+            <th>處置原因</th><th>層級</th><th class="num">撮合</th><th>預收款券</th>
+            <th>處置期間</th><th>解除</th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
+    </div>
+
+    <div class="card" style="margin-top:22px">
+      <h3>近 14 個交易日每日處置檔數</h3>
+      <p class="note">當日處於處置期間的普通股家數，同一檔重疊公告只計一次。</p>
+      <div class="legend">
+        <span><i style="background:var(--s1)"></i>上市</span>
+        <span><i style="background:var(--s2)"></i>上櫃</span>
+      </div>
+      <div class="chartbox" id="box-daily">
+        <div class="tip" id="tip-daily"></div>
+      </div>
     </div>
   </section>
 
@@ -320,6 +341,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
       <label>類型 <select id="f-type"><option value="">全部</option></select></label>
       <label>原因 <select id="f-reason"><option value="">全部</option></select></label>
       <label>層級 <select id="f-round"><option value="">全部</option><option value="1">第一次</option><option value="2">第二次</option></select></label>
+      <label>預收 <select id="f-prepay"><option value="">全部</option><option value="全面">全面</option><option value="條件">條件</option></select></label>
       <label>狀態 <select id="f-state"><option value="">全部</option><option value="live">處置中</option><option value="soon">即將開始</option><option value="done">已結束</option></select></label>
       <input type="search" id="f-q" placeholder="代號或名稱" aria-label="搜尋代號或名稱">
       <span class="count" id="f-count"></span>
@@ -329,7 +351,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
         <thead>
           <tr>
             <th>公布日</th><th>市場</th><th>代號</th><th>名稱</th><th>類型</th>
-            <th>原因</th><th>層級</th><th class="num">撮合</th><th class="num">期間</th>
+            <th>原因</th><th>層級</th><th class="num">撮合</th><th>預收</th><th class="num">期間</th>
             <th>處置起訖</th><th class="num">累計</th>
           </tr>
         </thead>
@@ -412,17 +434,48 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
   $("s-range").textContent = roc(D.range.start) + " – " + roc(D.range.end);
   $("s-gen").textContent = D.generated_at.replace("T", " ");
 
+  // ---------- 合併重疊公告 ----------
+  // 同一檔可能同時被多張處置公告拘束（前一次還沒結束又接了一次）。實際受限的是其中
+  // 最嚴格的條件，所以「現在」一律以證券為單位合併，而不是以公告為單位計數。
+  function mergeOrders(list) {
+    var byCode = {};
+    list.forEach(function (r) {
+      var k = r.market + "|" + r.code;
+      (byCode[k] = byCode[k] || []).push(r);
+    });
+    return Object.keys(byCode).map(function (k) {
+      var g = byCode[k];
+      var latest = g.reduce(function (a, b) { return (a.end || "") >= (b.end || "") ? a : b; });
+      var m = {};
+      Object.keys(latest).forEach(function (f) { m[f] = latest[f]; });
+      m.orders = g.length;
+      m.start = g.reduce(function (a, b) { return (a.start || "9999") <= (b.start || "9999") ? a : b; }).start;
+      m.prepay = g.some(function (r) { return r.prepay === "全面"; }) ? "全面"
+        : (g.some(function (r) { return r.prepay === "條件"; }) ? "條件" : null);
+      m.prepay_note = m.prepay === "全面" ? "所有委託一律預收"
+        : ((g.filter(function (r) { return r.prepay === "條件"; })[0] || {}).prepay_note || null);
+      // 撮合間隔越長越受限，取最長的那一張
+      var iv = g.map(function (r) { return r.interval_min; }).filter(function (v) { return v != null; });
+      m.interval_min = iv.length ? Math.max.apply(null, iv) : null;
+      var rd = g.map(function (r) { return r.round; }).filter(function (v) { return v != null; });
+      m.round = rd.length ? Math.max.apply(null, rd) : null;
+      return m;
+    });
+  }
+
   // ---------- stat strip ----------
-  var live = rows.filter(function (r) { return r.active; });
-  var soon = rows.filter(function (r) { return r.upcoming; });
+  var live = mergeOrders(rows.filter(function (r) { return r.active; }));
+  var soon = mergeOrders(rows.filter(function (r) { return r.upcoming; }));
   var liveStock = live.filter(function (r) { return r.type === "股票"; });
+  var payAll = liveStock.filter(function (r) { return r.prepay === "全面"; }).length;
+  var lastDay = liveStock.filter(function (r) { return r.end === TODAY; }).length;
   var listed = rows.filter(function (r) { return r.market === "上市"; }).length;
   var otc = rows.length - listed;
 
-  [["處置中", live.length, liveStock.length + " 檔為普通股", true],
-   ["即將開始", soon.length, "已公告，尚未起算", false],
-   ["一年內公告", rows.length, "同檔多次分別計數", false],
-   ["上市 ： 上櫃", listed + " : " + otc, (100 * otc / rows.length).toFixed(0) + "% 出自上櫃", false]
+  [["處置中 · 普通股", liveStock.length, (live.length - liveStock.length) + " 檔權證與可轉債另計", true],
+   ["需全面預收", payAll, "委託不分大小一律圈存", false],
+   ["今日最後一天", lastDay, "次一交易日起恢復", false],
+   ["一年內公告", rows.length, "上市 " + listed + " ： 上櫃 " + otc, false]
   ].forEach(function (s) {
     var c = el("div", "stat" + (s[3] ? " is-live" : ""));
     c.appendChild(el("div", "k", s[0]));
@@ -432,45 +485,164 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
   });
 
   // ---------- live table ----------
-  var liveRows = live.concat(soon).sort(function (a, b) {
-    return (a.end || "").localeCompare(b.end || "") || a.code.localeCompare(b.code);
-  });
   var lbody = document.querySelector("#live-table tbody");
-  if (!liveRows.length) {
-    var tr0 = el("tr");
-    var td0 = el("td", "", "資料截止日沒有處置中的標的。");
-    td0.colSpan = 9; td0.style.color = "var(--ink-2)"; td0.style.padding = "22px";
-    tr0.appendChild(td0); lbody.appendChild(tr0);
-  }
-  liveRows.forEach(function (r) {
-    var tr = el("tr");
-    var tdM = el("td"); tdM.appendChild(marketCell(r.market)); tr.appendChild(tdM);
-    tr.appendChild(el("td", "code", r.code));
-    tr.appendChild(el("td", "nm", r.name));
-    tr.appendChild(el("td", "", r.type));
-    tr.appendChild(el("td", "", r.reason));
-    var tdR = el("td"); tdR.appendChild(roundPill(r)); tr.appendChild(tdR);
-    tr.appendChild(el("td", "num", intervalText(r)));
-    tr.appendChild(el("td", "dt", roc(r.start) + " – " + roc(r.end)));
 
-    var tdP = el("td");
-    var wrapP = el("div", "prog");
-    if (r.upcoming) {
-      var p1 = el("span", "pill soon", dayDiff(TODAY, r.start) + " 天後開始");
-      wrapP.appendChild(p1);
-    } else {
-      var total = Math.max(1, dayDiff(r.start, r.end));
-      var gone = Math.min(total, Math.max(0, dayDiff(r.start, TODAY)));
-      var track = el("div", "track");
-      var fill = el("div", "fill");
-      fill.style.width = (100 * gone / total).toFixed(1) + "%";
-      track.appendChild(fill);
-      wrapP.appendChild(track);
-      wrapP.appendChild(el("span", "lab", "剩 " + (total - gone) + " 天"));
+  function fmtDate(d) {
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0")
+         + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function nextBiz(iso) {          // 次一營業日；只跳過週末，未計國定假日
+    var d = new Date(iso + "T00:00:00");
+    do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6);
+    return fmtDate(d);
+  }
+  function payCell(r) {
+    var td = el("td");
+    if (!r.prepay) { td.appendChild(document.createTextNode("—")); return td; }
+    var p = el("span", r.prepay === "全面" ? "pill pay-all" : "pill pay-cond", r.prepay);
+    if (r.prepay_note) p.title = r.prepay_note;
+    td.appendChild(p);
+    return td;
+  }
+
+  function renderLive() {
+    var withDerivs = $("show-derivs").checked;
+    var list = live.concat(soon)
+      .filter(function (r) { return withDerivs || r.type === "股票"; })
+      .sort(function (a, b) {
+        return (a.end || "").localeCompare(b.end || "") || a.code.localeCompare(b.code);
+      });
+
+    lbody.innerHTML = "";
+    if (!list.length) {
+      var tr0 = el("tr");
+      var td0 = el("td", "", "資料截止日沒有處置中的標的。");
+      td0.colSpan = 10; td0.style.color = "var(--ink-2)"; td0.style.padding = "22px";
+      tr0.appendChild(td0); lbody.appendChild(tr0);
+      return;
     }
-    tdP.appendChild(wrapP); tr.appendChild(tdP);
-    lbody.appendChild(tr);
-  });
+
+    list.forEach(function (r) {
+      var tr = el("tr");
+      var tdM = el("td"); tdM.appendChild(marketCell(r.market)); tr.appendChild(tdM);
+      tr.appendChild(el("td", "code", r.code));
+      tr.appendChild(el("td", "nm", r.name));
+      tr.appendChild(el("td", "", r.type));
+      tr.appendChild(el("td", "", r.reason));
+      var tdR = el("td"); tdR.appendChild(roundPill(r)); tr.appendChild(tdR);
+      tr.appendChild(el("td", "num", intervalText(r)));
+      tr.appendChild(payCell(r));
+
+      var tdD = el("td", "dt");
+      tdD.appendChild(document.createTextNode(roc(r.start) + " – " + roc(r.end) + " "));
+      if (r.orders > 1) {
+        var pm = el("span", "pill", r.orders + " 張公告");
+        pm.title = "此檔同時受多張處置公告拘束，表中取其中最嚴格的條件";
+        tdD.appendChild(pm);
+      }
+      tr.appendChild(tdD);
+
+      var tdRel = el("td");
+      var box = el("div", "rel");
+      if (r.upcoming) {
+        box.appendChild(el("span", "lab", dayDiff(TODAY, r.start) + " 天後開始"));
+        box.appendChild(el("span", "out", roc(r.start) + " 起算"));
+      } else {
+        var total = Math.max(1, dayDiff(r.start, r.end));
+        var gone = Math.min(total, Math.max(0, dayDiff(r.start, TODAY)));
+        var left = total - gone;
+        if (left === 0) box.className = "rel last";
+        var top = el("div", "top");
+        var track = el("div", "track");
+        var fill = el("div", "fill");
+        fill.style.width = (100 * gone / total).toFixed(1) + "%";
+        track.appendChild(fill);
+        top.appendChild(track);
+        top.appendChild(el("span", "lab", left === 0 ? "今日最後一天" : "剩 " + left + " 天"));
+        box.appendChild(top);
+        box.appendChild(el("span", "out", roc(nextBiz(r.end)) + " 起恢復"));
+      }
+      tdRel.appendChild(box);
+      tr.appendChild(tdRel);
+      lbody.appendChild(tr);
+    });
+  }
+  $("show-derivs").addEventListener("change", renderLive);
+  renderLive();
+
+  // ---------- chart: 每日處置檔數 ----------
+  (function () {
+    var days = [], cur = new Date(TODAY + "T00:00:00");
+    while (days.length < 14) {
+      if (cur.getDay() !== 0 && cur.getDay() !== 6) days.unshift(fmtDate(cur));
+      cur.setDate(cur.getDate() - 1);
+    }
+    var data = days.map(function (day) {
+      var seen = {}, o = { listed: 0, otc: 0 };
+      rows.forEach(function (r) {
+        if (r.type !== "股票" || !r.start || !r.end) return;
+        if (r.start > day || r.end < day) return;
+        var k = r.market + "|" + r.code;
+        if (seen[k]) return;                    // 同檔重疊公告只計一次
+        seen[k] = 1;
+        o[r.market === "上櫃" ? "otc" : "listed"]++;
+      });
+      return o;
+    });
+    var max = Math.max.apply(null, data.map(function (o) { return o.listed + o.otc; }).concat([1]));
+
+    var W = 900, H = 212, padL = 32, padR = 8, padT = 20, padB = 30;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var step = plotW / days.length, bw = Math.min(40, step * 0.62);
+    var s = svg(W, H);
+    s.setAttribute("aria-label", "近 14 個交易日每日處置普通股家數");
+
+    [0, 0.5, 1].forEach(function (f) {
+      var y = padT + plotH * (1 - f);
+      var ln = document.createElementNS(SVGNS, "line");
+      ln.setAttribute("x1", padL); ln.setAttribute("x2", W - padR);
+      ln.setAttribute("y1", y); ln.setAttribute("y2", y);
+      ln.setAttribute("stroke", "var(--rule)"); ln.setAttribute("stroke-width", 1);
+      s.appendChild(ln);
+      s.appendChild(text(padL - 7, y + 4, String(Math.round(max * f)), { anchor: "end", fill: "var(--ink-3)" }));
+    });
+
+    days.forEach(function (day, i) {
+      var o = data[i], tot = o.listed + o.otc;
+      var x = padL + step * i + (step - bw) / 2;
+      var hOtc = plotH * o.otc / max, hLis = plotH * o.listed / max;
+      var yOtc = padT + plotH - hOtc;
+      var yLis = yOtc - hLis - 2;                    // 兩段之間留 2px 縫
+      s.appendChild(rect(x, yOtc, bw, hOtc, "var(--s2)", 2));
+      s.appendChild(rect(x, yLis, bw, hLis, "var(--s1)", 2));
+      s.appendChild(text(x + bw / 2, yLis - 6, String(tot), { anchor: "middle", size: 10.5, fill: "var(--ink-2)" }));
+      s.appendChild(text(x + bw / 2, H - 10, day.slice(5).replace("-", "/"), { anchor: "middle", size: 10, fill: "var(--ink-3)" }));
+      var hit = rect(padL + step * i, padT, step, plotH, "transparent");
+      hit.addEventListener("mouseenter", function () { showDaily(day, o, tot, padL + step * i + step / 2); });
+      hit.addEventListener("mouseleave", function () { dtip.classList.remove("on"); });
+      s.appendChild(hit);
+    });
+    $("box-daily").insertBefore(s, $("tip-daily"));
+
+    var dtip = $("tip-daily"), dbox = $("box-daily");
+    function showDaily(day, o, tot, cx) {
+      dtip.innerHTML = "";
+      dtip.appendChild(el("div", "th", roc(day) + "　共 " + tot + " 檔"));
+      [["上市", o.listed, "var(--s1)"], ["上櫃", o.otc, "var(--s2)"]].forEach(function (p) {
+        var r0 = el("div", "tr");
+        var i0 = el("i"); i0.style.background = p[2];
+        r0.appendChild(i0);
+        r0.appendChild(document.createTextNode(p[0]));
+        r0.appendChild(el("b", "", String(p[1])));
+        dtip.appendChild(r0);
+      });
+      dtip.classList.add("on");
+      var scale = dbox.clientWidth / W;
+      dtip.style.left = Math.max(4, Math.min(dbox.clientWidth - dtip.offsetWidth - 4,
+        cx * scale - dtip.offsetWidth / 2)) + "px";
+      dtip.style.top = "0px";
+    }
+  })();
 
   // ---------- regime comparison ----------
   var CUT = "2026-08-01";
@@ -685,13 +857,14 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
 
   function filtered() {
     var mk = $("f-market").value, ty = $("f-type").value, re = $("f-reason").value,
-        ro = $("f-round").value, st = $("f-state").value,
+        ro = $("f-round").value, st = $("f-state").value, pp = $("f-prepay").value,
         q = $("f-q").value.trim().toLowerCase();
     return rows.filter(function (r) {
       if (mk && r.market !== mk) return false;
       if (ty && r.type !== ty) return false;
       if (re && r.reason !== re) return false;
       if (ro && String(r.round) !== ro) return false;
+      if (pp && r.prepay !== pp) return false;
       if (st && state(r) !== st) return false;
       if (q && (r.code + " " + r.name).toLowerCase().indexOf(q) < 0) return false;
       return true;
@@ -714,6 +887,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
       tr.appendChild(el("td", "", r.reason));
       var tdR = el("td"); tdR.appendChild(roundPill(r)); tr.appendChild(tdR);
       tr.appendChild(el("td", "num", intervalText(r)));
+      tr.appendChild(payCell(r));
       tr.appendChild(el("td", "num", r.days == null ? "—" : r.days + " 日"));
       var tdD = el("td", "dt");
       tdD.appendChild(document.createTextNode(roc(r.start) + " – " + roc(r.end) + " "));
@@ -727,7 +901,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
         if (open) { detailRow.remove(); open = false; return; }
         detailRow = el("tr");
         var td = el("td", "", r.detail || "（公告未提供摘要）");
-        td.colSpan = 11;
+        td.colSpan = 12;
         td.style.color = "var(--ink-2)";
         td.style.background = "var(--panel-2)";
         td.style.fontSize = "12.5px";
@@ -746,7 +920,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
     $("more").textContent = "顯示更多（還有 " + Math.max(0, list.length - shown) + " 件）";
   }
 
-  ["f-market", "f-type", "f-reason", "f-round", "f-state"].forEach(function (id) {
+  ["f-market", "f-type", "f-reason", "f-round", "f-prepay", "f-state"].forEach(function (id) {
     $(id).addEventListener("change", function () { shown = PAGE; render(); });
   });
   $("f-q").addEventListener("input", function () { shown = PAGE; render(); });

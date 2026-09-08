@@ -135,6 +135,37 @@ def disposal_days(text):
     return None
 
 
+SINGLE_RE = re.compile(r"單筆達\s*([0-9０-９零一二三四五六七八九十]{1,3})\s*交易單位")
+CUM_RE = re.compile(r"多筆累積達\s*([0-9０-９零一二三四五六七八九十]{1,3})\s*交易單位")
+
+
+def _units(raw):
+    raw = raw.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    return int(raw) if raw.isdigit() else cn_to_int(raw)
+
+
+def prepay_rule(text):
+    """處置期間的預收款券規定，回傳 (等級, 門檻說明)。
+
+    公告裡若載明「單筆達 N 交易單位或多筆累積達 M 交易單位以上」才收取全部價金，
+    代表只有大額委託需要預收；沒有這個門檻就是所有委託一律預收（第二次處置的常態）。
+    這是當沖與短線最直接的差別，必須在 detail 被截短前判定。
+    """
+    if not text:
+        return None, None
+    m1, m2 = SINGLE_RE.search(text), CUM_RE.search(text)
+    if m1 or m2:
+        parts = []
+        if m1:
+            parts.append("單筆 %s" % _units(m1.group(1)))
+        if m2:
+            parts.append("累計 %s" % _units(m2.group(1)))
+        return "條件", "／".join(parts) + " 交易單位以上"
+    if "收取全部之買進價金" in text:
+        return "全面", "所有委託一律預收"
+    return None, None
+
+
 def sec_type(code, name):
     """依代號/名稱判斷標的類型。"""
     code = (code or "").strip()
@@ -298,6 +329,8 @@ def enrich(rows, today):
         r["days"] = disposal_days(r["detail"])
         r["active"] = bool(r["start"] and r["end"] and r["start"] <= today <= r["end"])
         r["upcoming"] = bool(r["start"] and r["start"] > today)
+        # 預收規定要在截短前判定，門檻條款位在公告後段，截掉就會誤判成「全面」
+        r["prepay"], r["prepay_note"] = prepay_rule(r["detail"])
         # 網頁上不需要整段公告全文，只留前段供懸浮檢視
         r["detail"] = r["detail"][:400]
     rows.sort(key=lambda x: (x["announce_date"] or "", x["code"]), reverse=True)
