@@ -1,0 +1,13 @@
+# 產出物：每次 CI 都會重新抓取與重建，不進版控
+disposal_data.json
+disposal_data.json.tmp
+disposal.html
+_site/
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+.DS_Store
+Thumbs.db

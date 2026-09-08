@@ -1,0 +1,3 @@
+# 一律以 LF 存放。deploy.yml 裡的 shell heredoc 在 Linux runner 上若讀到 CRLF，
+# 終止符會比對不到而讓 CI 失敗。
+* text=auto eol=lf

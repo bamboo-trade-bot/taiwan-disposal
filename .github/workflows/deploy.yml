@@ -1,0 +1,74 @@
+name: 抓取並發佈處置股頁面
+
+# 排程時間為 UTC；台北時間 = UTC + 8。
+# 09:30 台北（01:30 UTC）：盤前，確認當日起算的處置名單。
+# 18:30 台北（10:30 UTC）：收盤後公告都發完了，抓當日新增。
+on:
+  schedule:
+    - cron: "30 1 * * 1-5"
+    - cron: "30 10 * * 1-5"
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      months:
+        description: "統計區間月數"
+        required: false
+        default: "12"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時只跑一個部署；排隊中的舊工作直接取消
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 抓取處置公告
+        run: python fetch_disposal.py --months "${{ github.event.inputs.months || '12' }}"
+
+      - name: 產生頁面
+        run: |
+          python build_page.py
+          mkdir -p _site
+          cp disposal.html _site/index.html
+          # 一併發佈原始資料，方便其他程式直接取用
+          cp disposal_data.json _site/disposal_data.json
+
+      - name: 檢查產出
+        run: |
+          test -s _site/index.html || { echo "index.html 是空的"; exit 1; }
+          python - <<'PY'
+          import json
+          d = json.load(open("_site/disposal_data.json", encoding="utf-8"))
+          n = len(d["rows"])
+          print("rows:", n, "generated:", d["generated_at"])
+          # 兩個來源都失效時 rows 會是 0，這種情況不要蓋掉線上還能用的舊版本
+          assert n > 0, "沒有抓到任何公告，中止部署"
+          PY
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
