@@ -114,6 +114,9 @@ section { margin-top: 44px; }
 /* ---------- tables ---------- */
 .tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--panel); }
 table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+/* 欄位多，視窗變窄時讓容器橫向捲動，不要把儲存格擠成好幾行高 */
+#live-table { min-width: 940px; }
+#all-table { min-width: 1040px; }
 thead th {
   position: sticky; top: 0; background: var(--panel-2); text-align: left;
   font-family: var(--f-mono); font-size: 11px; font-weight: 600; letter-spacing: .07em;
@@ -163,22 +166,7 @@ td.dt { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); whit
 .rel .out { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 .rel.last .lab { color: var(--accent); font-weight: 600; }
 
-/* ---------- regime-change panel ---------- */
-.regime { border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 4px; background: var(--panel); padding: 22px 24px; box-shadow: var(--shadow); }
-.regime > p { margin: 0 0 20px; color: var(--ink-2); max-width: 74ch; font-size: 14px; }
-.regime > p b { color: var(--ink); }
-.cmp { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 40px; }
-.cmp h3 { font-family: var(--f-body); font-size: 13px; font-weight: 700; letter-spacing: .02em; margin-bottom: 10px; }
-.rows { display: flex; flex-direction: column; gap: 7px; }
-.row { display: grid; grid-template-columns: 88px 1fr 62px; align-items: center; gap: 10px; }
-.row .rl { font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); text-align: right; }
-.row .rt { height: 13px; background: var(--rule-2); border-radius: 2px; overflow: hidden; }
-.row .rf { height: 100%; border-radius: 2px; }
-.row .rv { font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.row.hi .rl, .row.hi .rv { color: var(--ink); font-weight: 600; }
-
-/* ---------- charts ---------- */
-.grid2 { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 22px; }
+/* ---------- chart ---------- */
 .card { border: 1px solid var(--rule); border-radius: 4px; background: var(--panel); padding: 18px 20px 14px; }
 .card h3 { font-family: var(--f-body); font-size: 14px; font-weight: 700; }
 .card .note { margin: 3px 0 14px; font-size: 12.5px; color: var(--ink-2); }
@@ -220,9 +208,7 @@ footer { margin-top: 52px; padding-top: 18px; border-top: 1px solid var(--rule);
 footer p { margin: 0 0 6px; max-width: 78ch; }
 
 @media (max-width: 900px) {
-  .grid2 { grid-template-columns: minmax(0, 1fr); }
   .stats { grid-template-columns: repeat(2, 1fr); }
-  .cmp { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -232,7 +218,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
   <header class="masthead">
     <p class="eyebrow">TWSE &amp; TPEx · 公布處置有價證券</p>
     <h1>台股處置股觀測</h1>
-    <p class="sub">彙整證交所（上市）與櫃買中心（上櫃）兩邊分開發布的處置公告，統一成一張表：現在誰在處置中、撮合多久一次、還剩幾天，以及過去一年的處置樣貌。</p>
+    <p class="sub">彙整證交所（上市）與櫃買中心（上櫃）兩邊分開發布的處置公告，統一成一張表：現在誰在處置中、撮合多久一次、要不要預收款券、哪天出關。</p>
     <div class="stamp">
       <span>資料截止 <b id="s-today"></b></span>
       <span>統計區間 <b id="s-range"></b></span>
@@ -280,63 +266,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
     </div>
   </section>
 
-  <section id="regime">
-    <div class="sec-head">
-      <h2>制度在 2026 年 8 月變了</h2>
-      <p>資料本身透露的轉折，兩個市場同步發生。</p>
-    </div>
-    <div class="regime">
-      <p>過去一年的公告裡，<b>2026 年 8 月是一道清楚的分界</b>：在那之前，處置股以人工撮合<b>每 5 分鐘</b>（加重者每 20 分鐘）成交、處置期間多為 <b>10 個營業日</b>；8 月起的新公告一律改為<b>每 2 分鐘</b>撮合、期間縮短為 <b>5 個營業日</b>（加重者 7 日）。撮合變密、期間變短，代表處置對流動性的壓抑明顯放鬆——拿更早的處置經驗推估現在的走勢，基準已經不同了。</p>
-      <div class="cmp">
-        <div>
-          <h3>撮合間隔</h3>
-          <div class="rows" id="cmp-interval"></div>
-        </div>
-        <div>
-          <h3>處置期間（營業日）</h3>
-          <div class="rows" id="cmp-days"></div>
-        </div>
-      </div>
-    </div>
-  </section>
 
-  <section id="charts">
-    <div class="sec-head">
-      <h2>過去一年的處置樣貌</h2>
-      <p>以公告日歸月。同一檔證券多次被處置會分別計次。</p>
-    </div>
-    <div class="grid2">
-      <div class="card">
-        <h3>每月處置公告數</h3>
-        <p class="note">上市與上櫃分開統計；柱上數字為當月合計。</p>
-        <div class="legend">
-          <span><i style="background:var(--s1)"></i>上市</span>
-          <span><i style="background:var(--s2)"></i>上櫃</span>
-        </div>
-        <div class="chartbox" id="box-month">
-          <div class="tip" id="tip-month"></div>
-        </div>
-      </div>
-      <div class="card">
-        <h3>處置原因分布</h3>
-        <p class="note">依公告內容歸類，單位為公告次數。</p>
-        <div class="chartbox" id="box-reason"></div>
-      </div>
-    </div>
-
-    <div class="grid2" style="margin-top:22px">
-      <div class="card">
-        <h3>一年內被處置最多次的個股</h3>
-        <p class="note">僅計普通股，不含權證與可轉債。</p>
-        <div class="chartbox" id="box-top"></div>
-      </div>
-      <div class="card">
-        <h3>標的類型與處置層級</h3>
-        <p class="note">第二次處置＝最近 30 個營業日內曾被處置，措施加重。</p>
-        <div class="chartbox" id="box-mix"></div>
-      </div>
-    </div>
-  </section>
 
   <section id="all">
     <div class="sec-head">
@@ -660,202 +590,6 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
         cx * scale - dtip.offsetWidth / 2)) + "px";
       dtip.style.top = "0px";
     }
-  })();
-
-  // ---------- regime comparison ----------
-  var CUT = "2026-08-01";
-  function tally(pred, key) {
-    var m = {};
-    rows.forEach(function (r) {
-      if (!pred(r) || r[key] == null) return;
-      m[r[key]] = (m[r[key]] || 0) + 1;
-    });
-    return m;
-  }
-  var before = function (r) { return r.announce_date < CUT; };
-  var after = function (r) { return r.announce_date >= CUT; };
-
-  function buildCmp(host, key, unit, highlight) {
-    var mb = tally(before, key), ma = tally(after, key);
-    var keys = Object.keys(mb).concat(Object.keys(ma))
-      .filter(function (v, i, a) { return a.indexOf(v) === i; })
-      .map(Number).sort(function (a, b) { return a - b; });
-    var maxB = Math.max.apply(null, keys.map(function (k) { return mb[k] || 0; }).concat([1]));
-    var maxA = Math.max.apply(null, keys.map(function (k) { return ma[k] || 0; }).concat([1]));
-
-    [["2026/08 前", mb, maxB, "var(--s1)"], ["2026/08 起", ma, maxA, "var(--s2)"]].forEach(function (grp) {
-      var head = el("div", "row");
-      var lab = el("div", "rl"); lab.style.fontWeight = "600"; lab.style.color = "var(--ink)";
-      lab.textContent = grp[0];
-      head.appendChild(lab);
-      head.appendChild(el("div", ""));
-      head.appendChild(el("div", ""));
-      host.appendChild(head);
-
-      keys.forEach(function (k) {
-        var n = grp[1][k] || 0;
-        if (!n) return;
-        var row = el("div", "row" + (highlight.indexOf(k) >= 0 ? " hi" : ""));
-        row.appendChild(el("div", "rl", k + " " + unit));
-        var t = el("div", "rt");
-        var f = el("div", "rf");
-        f.style.width = (100 * n / grp[2]).toFixed(1) + "%";
-        f.style.background = grp[3];
-        t.appendChild(f);
-        row.appendChild(t);
-        row.appendChild(el("div", "rv", n + " 件"));
-        host.appendChild(row);
-      });
-    });
-  }
-  buildCmp($("cmp-interval"), "interval_min", "分鐘", [2]);
-  buildCmp($("cmp-days"), "days", "日", [5, 7]);
-
-  // ---------- chart: monthly stacked bars ----------
-  (function () {
-    var byMonth = {};
-    rows.forEach(function (r) {
-      if (!r.announce_date) return;
-      var m = r.announce_date.slice(0, 7);
-      if (!byMonth[m]) byMonth[m] = { listed: 0, otc: 0 };
-      byMonth[m][r.market === "上櫃" ? "otc" : "listed"]++;
-    });
-    var months = Object.keys(byMonth).sort();
-    var max = Math.max.apply(null, months.map(function (m) { return byMonth[m].listed + byMonth[m].otc; }));
-
-    var W = 620, H = 260, padL = 34, padR = 8, padT = 22, padB = 34;
-    var plotW = W - padL - padR, plotH = H - padT - padB;
-    var bw = Math.min(34, plotW / months.length * 0.66);
-    var step = plotW / months.length;
-    var s = svg(W, H);
-    s.setAttribute("aria-label", "每月處置公告數，上市與上櫃堆疊");
-
-    [0, 0.5, 1].forEach(function (f) {
-      var y = padT + plotH * (1 - f);
-      var ln = document.createElementNS(SVGNS, "line");
-      ln.setAttribute("x1", padL); ln.setAttribute("x2", W - padR);
-      ln.setAttribute("y1", y); ln.setAttribute("y2", y);
-      ln.setAttribute("stroke", "var(--rule)"); ln.setAttribute("stroke-width", 1);
-      s.appendChild(ln);
-      s.appendChild(text(padL - 7, y + 4, String(Math.round(max * f)), { anchor: "end", fill: "var(--ink-3)" }));
-    });
-
-    months.forEach(function (m, i) {
-      var d = byMonth[m], tot = d.listed + d.otc;
-      var x = padL + step * i + (step - bw) / 2;
-      var hOtc = plotH * d.otc / max, hLis = plotH * d.listed / max;
-      var yOtc = padT + plotH - hOtc;
-      var yLis = yOtc - hLis - 2;                       // 2px surface gap between segments
-      s.appendChild(rect(x, yOtc, bw, hOtc, "var(--s2)", 2));
-      s.appendChild(rect(x, yLis, bw, hLis, "var(--s1)", 2));
-      s.appendChild(text(x + bw / 2, yLis - 6, String(tot), { anchor: "middle", size: 10.5, fill: "var(--ink-2)" }));
-      if (i % 2 === 0 || months.length <= 8) {
-        s.appendChild(text(x + bw / 2, H - 12, m.slice(2).replace("-", "/"), { anchor: "middle", size: 10.5, fill: "var(--ink-3)" }));
-      }
-      var hit = rect(padL + step * i, padT, step, plotH, "transparent");
-      hit.style.cursor = "default";
-      hit.addEventListener("mouseenter", function () { showTip(m, d, tot, padL + step * i + step / 2); });
-      hit.addEventListener("mouseleave", hideTip);
-      s.appendChild(hit);
-    });
-    $("box-month").insertBefore(s, $("tip-month"));
-
-    var tip = $("tip-month"), box = $("box-month");
-    function showTip(m, d, tot, cx) {
-      tip.innerHTML = "";
-      tip.appendChild(el("div", "th", roc(m + "-01").slice(0, 6) + "　共 " + tot + " 件"));
-      [["上市", d.listed, "var(--s1)"], ["上櫃", d.otc, "var(--s2)"]].forEach(function (p) {
-        var r0 = el("div", "tr");
-        var i0 = el("i"); i0.style.background = p[2];
-        r0.appendChild(i0);
-        r0.appendChild(document.createTextNode(p[0]));
-        r0.appendChild(el("b", "", String(p[1])));
-        tip.appendChild(r0);
-      });
-      tip.classList.add("on");
-      var scale = box.clientWidth / W;
-      var left = cx * scale;
-      tip.style.left = Math.max(4, Math.min(box.clientWidth - tip.offsetWidth - 4, left - tip.offsetWidth / 2)) + "px";
-      tip.style.top = "0px";
-    }
-    function hideTip() { tip.classList.remove("on"); }
-  })();
-
-  // ---------- horizontal bar helper ----------
-  function hbar(host, items, opts) {
-    opts = opts || {};
-    var labelW = opts.labelW || 128;
-    var W = 420, rowH = 27, padT = 4, padR = 46;
-    var H = padT + items.length * rowH + 4;
-    var max = Math.max.apply(null, items.map(function (d) { return d.v; }).concat([1]));
-    var barW = W - labelW - padR;
-    var s = svg(W, H);
-    s.setAttribute("aria-label", opts.aria || "");
-    items.forEach(function (d, i) {
-      var y = padT + i * rowH;
-      s.appendChild(text(labelW - 9, y + 15, d.k, { anchor: "end", size: 11.5, fill: "var(--ink-2)" }));
-      s.appendChild(rect(labelW, y + 5, barW, 13, "var(--rule-2)", 2));
-      s.appendChild(rect(labelW, y + 5, barW * d.v / max, 13, d.c || "var(--s1)", 2));
-      s.appendChild(text(labelW + barW + 8, y + 15, String(d.v), { size: 11.5, fill: "var(--ink-2)", weight: 500 }));
-      if (d.sub) s.appendChild(text(labelW + 6, y + 15, d.sub, { size: 10.5, fill: "var(--panel)", weight: 600 }));
-    });
-    host.appendChild(s);
-  }
-
-  // ---------- chart: reasons ----------
-  (function () {
-    var m = {};
-    rows.forEach(function (r) { m[r.reason] = (m[r.reason] || 0) + 1; });
-    var items = Object.keys(m).map(function (k) { return { k: k, v: m[k] }; })
-      .sort(function (a, b) { return b.v - a.v; });
-    hbar($("box-reason"), items, { labelW: 150, aria: "處置原因分布" });
-  })();
-
-  // ---------- chart: most-disposed stocks ----------
-  (function () {
-    var m = {};
-    rows.forEach(function (r) {
-      if (r.type !== "股票") return;
-      var k = r.code + " " + r.name;
-      if (!m[k]) m[k] = { n: 0, mk: r.market };
-      m[k].n++;
-    });
-    var items = Object.keys(m).map(function (k) {
-      return { k: k, v: m[k].n, c: m[k].mk === "上櫃" ? "var(--s2)" : "var(--s1)" };
-    }).sort(function (a, b) { return b.v - a.v; }).slice(0, 10);
-    hbar($("box-top"), items, { labelW: 150, aria: "一年內被處置次數最多的個股" });
-    var lg = el("div", "legend");
-    lg.style.marginTop = "8px";
-    [["上市", "var(--s1)"], ["上櫃", "var(--s2)"]].forEach(function (p) {
-      var sp = el("span");
-      var ic = el("i"); ic.style.background = p[1];
-      sp.appendChild(ic); sp.appendChild(document.createTextNode(p[0]));
-      lg.appendChild(sp);
-    });
-    $("box-top").appendChild(lg);
-  })();
-
-  // ---------- chart: type × round ----------
-  (function () {
-    var types = ["股票", "可轉債", "權證"];
-    var items = [];
-    types.forEach(function (t) {
-      var r1 = rows.filter(function (r) { return r.type === t && r.round === 1; }).length;
-      var r2 = rows.filter(function (r) { return r.type === t && r.round === 2; }).length;
-      if (r1 + r2 === 0) return;
-      items.push({ k: t + "・第一次", v: r1, c: "var(--s1)" });
-      items.push({ k: t + "・第二次", v: r2, c: "var(--s2)" });
-    });
-    hbar($("box-mix"), items, { labelW: 128, aria: "標的類型與處置層級" });
-    var lg = el("div", "legend");
-    lg.style.marginTop = "8px";
-    [["第一次處置", "var(--s1)"], ["第二次處置（加重）", "var(--s2)"]].forEach(function (p) {
-      var sp = el("span");
-      var ic = el("i"); ic.style.background = p[1];
-      sp.appendChild(ic); sp.appendChild(document.createTextNode(p[0]));
-      lg.appendChild(sp);
-    });
-    $("box-mix").appendChild(lg);
   })();
 
   // ---------- full table ----------
