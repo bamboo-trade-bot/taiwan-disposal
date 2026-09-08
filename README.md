@@ -128,6 +128,12 @@ python fetch_disposal.py && python build_page.py
 |---|---|---|
 | 上市 | <https://www.twse.com.tw/zh/announcement/punish.html> | `twse.com.tw/rwd/zh/announcement/punish?startDate=&endDate=&response=json` |
 | 上櫃 | <https://www.tpex.org.tw/zh-tw/announce/market/disposal.html> | `tpex.org.tw/www/zh-tw/bulletin/disposal?startDate=&endDate=&response=json` |
+| 休市日曆 | 證交所市場開休市日期 | `twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule?response=json&queryYear=<民國年>` |
+| 股期標的 | <https://www.taifex.com.tw/cht/2/stockLists> | 同一網址，HTML 表格解析 |
+
+休市日曆有個容易踩的地方：清單裡同時列出「國曆新年開始交易日」「農曆春節前最後交易日」
+這類**照常交易**的資訊列，必須排除，否則會把交易日誤判成休市。股期清單是 HTML 解析，
+較脆弱，取不到時只是少了標註，不影響其他資料。
 
 兩個 API 的查詢語意不同，抓取時都以「月」為單位分段後去重：
 
@@ -146,6 +152,8 @@ python fetch_disposal.py && python build_page.py
 | `prepay` | 預收款券規定。公告載明「單筆達 N 交易單位或多筆累積達 M 交易單位以上」才收取全部價金者為**條件**預收；沒有這個門檻就是**全面**預收（所有委託一律圈存，第二次處置的常態）。**必須在 `detail` 被截短前判定**——門檻條款位在公告後段，截掉會誤判成全面 |
 | `type` | 由代號長度判定：4 碼股票、5 碼可轉債、6 碼權證、00xx 為 ETF |
 | `reason` | 由處置條件與內容關鍵字歸類 |
+| `release` | 出關日＝處置期滿後第一個交易日，依證交所休市日曆推算，已扣除週末與國定假日 |
+| `has_future` | 是否為期交所股票期貨標的。處置期間現股受人工撮合與預收限制，股期仍連續交易 |
 | `active` / `upcoming` | 以資料截止日與處置起訖日比對 |
 
 ## 現況為什麼以「證券」而非「公告」計數

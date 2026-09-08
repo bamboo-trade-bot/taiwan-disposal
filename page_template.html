@@ -145,6 +145,13 @@ td.dt { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); whit
 .pill.pay-all { background: var(--accent); border-color: var(--accent); color: var(--panel); font-weight: 600; }
 .pill.pay-cond { border-style: dotted; }
 
+/* 股期標記：處置期間現股受限，有股期就還有連續交易的工具 */
+.fut {
+  display: inline-block; margin-left: 6px; padding: 0 4px; vertical-align: 1px;
+  font-family: var(--f-mono); font-size: 10px; font-weight: 600; line-height: 1.6;
+  border: 1px solid var(--ink-2); border-radius: 2px; color: var(--ink-2);
+}
+
 .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
 .toggle input { accent-color: var(--accent); }
 
@@ -244,7 +251,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
 
     <div class="sec-head" style="margin-top:26px">
       <h2 style="font-size:17px">處置中與即將開始的標的</h2>
-      <p>依解除日排序。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。</p>
+      <p>依解除日排序。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。<span id="live-note"></span></p>
       <label class="toggle"><input type="checkbox" id="show-derivs"> 一併顯示權證與可轉債</label>
     </div>
     <div class="tablewrap">
@@ -342,6 +349,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
       <label>原因 <select id="f-reason"><option value="">全部</option></select></label>
       <label>層級 <select id="f-round"><option value="">全部</option><option value="1">第一次</option><option value="2">第二次</option></select></label>
       <label>預收 <select id="f-prepay"><option value="">全部</option><option value="全面">全面</option><option value="條件">條件</option></select></label>
+      <label>股期 <select id="f-fut"><option value="">全部</option><option value="1">有</option><option value="0">無</option></select></label>
       <label>狀態 <select id="f-state"><option value="">全部</option><option value="live">處置中</option><option value="soon">即將開始</option><option value="done">已結束</option></select></label>
       <input type="search" id="f-q" placeholder="代號或名稱" aria-label="搜尋代號或名稱">
       <span class="count" id="f-count"></span>
@@ -363,7 +371,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
   </section>
 
   <footer>
-    <p>資料來源：臺灣證券交易所「公布處置有價證券」與證券櫃檯買賣中心「上櫃處置有價證券」公告，兩者各自發布、欄位不同，本頁統一欄位後合併。「撮合間隔」「處置營業日數」「處置層級」由公告全文擷取；上櫃公告未設處置層級欄位，以文中是否載明「第二次處置」或「最近 30 個營業日內曾發布處置」判定。</p>
+    <p>資料來源：臺灣證券交易所「公布處置有價證券」與證券櫃檯買賣中心「上櫃處置有價證券」公告，兩者各自發布、欄位不同，本頁統一欄位後合併。「撮合間隔」「處置營業日數」「處置層級」「預收款券」由公告全文擷取；上櫃公告未設處置層級欄位，以文中是否載明「第二次處置」或「最近 30 個營業日內曾發布處置」判定。出關日依證交所公布之市場開休市日期推算至處置期滿後第一個交易日；「期」的標註來自臺灣期貨交易所「股票期貨／股票選擇權交易標的」清單。</p>
     <p>本頁為公開資訊整理，不構成投資建議。實際處置措施與期間以交易所、櫃買中心公告為準。</p>
   </footer>
 </div>
@@ -491,10 +499,15 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0")
          + "-" + String(d.getDate()).padStart(2, "0");
   }
-  function nextBiz(iso) {          // 次一營業日；只跳過週末，未計國定假日
-    var d = new Date(iso + "T00:00:00");
-    do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6);
-    return fmtDate(d);
+  function nameCell(r) {
+    var td = el("td", "nm");
+    td.appendChild(document.createTextNode(r.name));
+    if (r.has_future) {
+      var b = el("span", "fut", "期");
+      b.title = "有股票期貨掛牌。處置期間現股受人工撮合與預收限制，股期仍照常連續交易";
+      td.appendChild(b);
+    }
+    return td;
   }
   function payCell(r) {
     var td = el("td");
@@ -526,7 +539,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
       var tr = el("tr");
       var tdM = el("td"); tdM.appendChild(marketCell(r.market)); tr.appendChild(tdM);
       tr.appendChild(el("td", "code", r.code));
-      tr.appendChild(el("td", "nm", r.name));
+      tr.appendChild(nameCell(r));
       tr.appendChild(el("td", "", r.type));
       tr.appendChild(el("td", "", r.reason));
       var tdR = el("td"); tdR.appendChild(roundPill(r)); tr.appendChild(tdR);
@@ -560,7 +573,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
         top.appendChild(track);
         top.appendChild(el("span", "lab", left === 0 ? "今日最後一天" : "剩 " + left + " 天"));
         box.appendChild(top);
-        box.appendChild(el("span", "out", roc(nextBiz(r.end)) + " 起恢復"));
+        box.appendChild(el("span", "out", (r.release ? roc(r.release) : "—") + " 起恢復"));
       }
       tdRel.appendChild(box);
       tr.appendChild(tdRel);
@@ -569,6 +582,11 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
   }
   $("show-derivs").addEventListener("change", renderLive);
   renderLive();
+
+  $("live-note").textContent = "　處置中的 " + liveStock.length + " 檔普通股裡，"
+    + liveStock.filter(function (r) { return r.has_future; }).length
+    + " 檔有股票期貨（標示「期」）。出關日已扣除週末與國定假日"
+    + (D.calendar_ok ? "。" : "；本次未能取得休市日曆，僅跳過週末。");
 
   // ---------- chart: 每日處置檔數 ----------
   (function () {
@@ -858,13 +876,14 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
   function filtered() {
     var mk = $("f-market").value, ty = $("f-type").value, re = $("f-reason").value,
         ro = $("f-round").value, st = $("f-state").value, pp = $("f-prepay").value,
-        q = $("f-q").value.trim().toLowerCase();
+        fu = $("f-fut").value, q = $("f-q").value.trim().toLowerCase();
     return rows.filter(function (r) {
       if (mk && r.market !== mk) return false;
       if (ty && r.type !== ty) return false;
       if (re && r.reason !== re) return false;
       if (ro && String(r.round) !== ro) return false;
       if (pp && r.prepay !== pp) return false;
+      if (fu && String(r.has_future ? 1 : 0) !== fu) return false;
       if (st && state(r) !== st) return false;
       if (q && (r.code + " " + r.name).toLowerCase().indexOf(q) < 0) return false;
       return true;
@@ -882,7 +901,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
       tr.appendChild(el("td", "dt", roc(r.announce_date)));
       var tdM = el("td"); tdM.appendChild(marketCell(r.market)); tr.appendChild(tdM);
       tr.appendChild(el("td", "code", r.code));
-      tr.appendChild(el("td", "nm", r.name));
+      tr.appendChild(nameCell(r));
       tr.appendChild(el("td", "", r.type));
       tr.appendChild(el("td", "", r.reason));
       var tdR = el("td"); tdR.appendChild(roundPill(r)); tr.appendChild(tdR);
@@ -920,7 +939,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
     $("more").textContent = "顯示更多（還有 " + Math.max(0, list.length - shown) + " 件）";
   }
 
-  ["f-market", "f-type", "f-reason", "f-round", "f-prepay", "f-state"].forEach(function (id) {
+  ["f-market", "f-type", "f-reason", "f-round", "f-prepay", "f-fut", "f-state"].forEach(function (id) {
     $(id).addEventListener("change", function () { shown = PAGE; render(); });
   });
   $("f-q").addEventListener("input", function () { shown = PAGE; render(); });

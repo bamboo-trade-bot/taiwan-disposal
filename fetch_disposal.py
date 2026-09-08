@@ -26,6 +26,9 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 TWSE_URL = "https://www.twse.com.tw/rwd/zh/announcement/punish?startDate={a}&endDate={b}&response=json"
 TPEX_URL = "https://www.tpex.org.tw/www/zh-tw/bulletin/disposal?startDate={a}&endDate={b}&response=json"
 TPEX_REFERER = "https://www.tpex.org.tw/zh-tw/announce/market/disposal.html"
+HOLIDAY_URL = ("https://www.twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule"
+               "?response=json&queryYear={roc}")
+TAIFEX_URL = "https://www.taifex.com.tw/cht/2/stockLists"
 
 
 def get_json(url, referer=None, retries=3):
@@ -292,6 +295,77 @@ def fetch_tpex(start, end):
     return rows
 
 
+# ---------- 交易日曆 ----------
+
+def fetch_holidays(years, log):
+    """證交所公布的市場休市日，回傳 (休市日集合, 是否至少取得一年)。
+
+    注意：這份清單同時列出「國曆新年開始交易日」「農曆春節前最後交易日」這類
+    照常交易的資訊列，必須排除，否則會把交易日誤判為休市。
+    """
+    days, ok = set(), False
+    for y in years:
+        try:
+            d = get_json(HOLIDAY_URL.format(roc=y - 1911))
+        except Exception as e:
+            log("holiday calendar %d unavailable: %s" % (y, e))
+            continue
+        if d.get("stat") != "ok":
+            continue
+        for r in (d.get("data") or []):
+            iso, name = (r[0] or "").strip(), (r[1] or "")
+            if "開始交易" in name or "最後交易" in name:
+                continue
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", iso):
+                days.add(iso)
+                ok = True
+        log("holiday calendar %d: ok" % y)
+    return days, ok
+
+
+def next_trading_day(iso, holidays):
+    """處置期滿後第一個可正常交易的日子。"""
+    if not iso:
+        return None
+    d = dt.date.fromisoformat(iso) + dt.timedelta(days=1)
+    for _ in range(40):
+        if d.weekday() < 5 and d.isoformat() not in holidays:
+            return d.isoformat()
+        d += dt.timedelta(days=1)
+    return None
+
+
+# ---------- 股票期貨標的 ----------
+
+def fetch_stock_futures(log):
+    """期交所掛牌的股票期貨標的證券代號。
+
+    處置期間現股受人工撮合與預收款券限制，但股期照常連續交易，
+    所以「有沒有股期」是處置期間還有沒有工具可用的關鍵。
+    取不到時回傳空集合，頁面只是少了標註，不影響其他資料。
+    """
+    try:
+        req = urllib.request.Request(TAIFEX_URL, headers=UA)
+        with urllib.request.urlopen(req, timeout=45) as r:
+            html = r.read().decode("utf-8", "replace")
+    except Exception as e:
+        log("stock futures list unavailable: %s" % e)
+        return set()
+    m = re.search(r"<tbody.*?</tbody>", html, re.S)
+    if not m:
+        log("stock futures list: table not found")
+        return set()
+    codes = set()
+    for row in re.findall(r"<tr.*?</tr>", m.group(0), re.S):
+        cells = [re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", c)).strip()
+                 for c in re.findall(r"<td.*?</td>", row, re.S)]
+        # 欄位：商品代碼｜標的公司全名｜標的代號｜標的簡稱｜是否為股票期貨標的…
+        if len(cells) >= 5 and re.match(r"^\d{4,6}$", cells[2]) and cells[4]:
+            codes.add(cells[2])
+    log("stock futures underlyings: %d" % len(codes))
+    return codes
+
+
 def to_int(v):
     try:
         return int(str(v).strip())
@@ -320,8 +394,12 @@ def month_chunks(start, end):
     return out
 
 
-def enrich(rows, today):
+def enrich(rows, today, holidays=None, futures=None):
+    holidays = holidays or set()
+    futures = futures or set()
     for r in rows:
+        r["release"] = next_trading_day(r["end"], holidays)   # 出關日
+        r["has_future"] = r["code"] in futures
         r["type"] = sec_type(r["code"], r["name"])
         r["reason"] = reason_class(r["reason_raw"], r["detail"])
         r["round"] = round_no(r["measure_raw"], r["detail"])
@@ -362,10 +440,15 @@ def collect(start, end, today=None, log=None):
     tpex = fetch_tpex(start, end + dt.timedelta(days=30))
     log("TPEx %d rows" % len(tpex))
 
-    rows = enrich(twse + tpex, today.isoformat())
+    # 出關日要跳過國定假日，涵蓋今年與明年（明年的行事曆通常年底才公布）
+    holidays, calendar_ok = fetch_holidays([today.year, today.year + 1], log)
+    futures = fetch_stock_futures(log)
+
+    rows = enrich(twse + tpex, today.isoformat(), holidays, futures)
     return {
         "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
         "today": today.isoformat(),
+        "calendar_ok": calendar_ok,
         "range": {"start": start.isoformat(), "end": end.isoformat()},
         "sources": {
             "listed": "https://www.twse.com.tw/zh/announcement/punish.html",

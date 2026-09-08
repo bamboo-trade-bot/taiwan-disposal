@@ -17,7 +17,7 @@ PLACEHOLDER = "/*__DATA__*/"
 # 頁面實際用到的欄位；其餘（原始欄位、收盤價、本益比）不進頁面以縮小檔案
 KEEP = ["market", "announce_date", "code", "name", "type", "reason", "round",
         "interval_min", "days", "start", "end", "active", "upcoming",
-        "cumulative", "prepay", "prepay_note", "detail"]
+        "cumulative", "prepay", "prepay_note", "release", "has_future", "detail"]
 DETAIL_CHARS = 180
 
 
@@ -34,6 +34,7 @@ def slim(payload):
     return {
         "generated_at": payload["generated_at"],
         "today": payload["today"],
+        "calendar_ok": payload.get("calendar_ok", False),
         "range": payload["range"],
         "rows": rows,
     }
