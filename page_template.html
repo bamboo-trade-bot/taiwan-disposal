@@ -19,6 +19,7 @@
   --s1:       #2a78d6;
   --s2:       #eb6834;
   --s3:       #1baf7a;
+  --good:     #1c7c4f;
   --focus:    #2a78d6;
   --shadow:   0 1px 2px rgba(21,24,29,.06), 0 8px 24px rgba(21,24,29,.05);
 
@@ -42,6 +43,7 @@
     --s1:       #3987e5;
     --s2:       #d95926;
     --s3:       #199e70;
+    --good:     #46b183;
     --focus:    #3987e5;
     --shadow:   0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
   }
@@ -61,6 +63,7 @@
   --s1:       #3987e5;
   --s2:       #d95926;
   --s3:       #199e70;
+  --good:     #46b183;
   --focus:    #3987e5;
   --shadow:   0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
 }
@@ -147,6 +150,7 @@ td.dt { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); whit
 /* 全面預收＝所有委託一律圈存，是當沖最直接的限制，給它最強的視覺重量 */
 .pill.pay-all { background: var(--accent); border-color: var(--accent); color: var(--panel); font-weight: 600; }
 .pill.pay-cond { border-style: dotted; }
+.pill.freed { border-color: var(--good); color: var(--good); font-weight: 600; }
 
 /* 股期標記：處置期間現股受限，有股期就還有連續交易的工具 */
 .fut {
@@ -165,6 +169,8 @@ td.dt { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); whit
 .rel .lab { font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); white-space: nowrap; }
 .rel .out { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 .rel.last .lab { color: var(--accent); font-weight: 600; }
+.rel.freed .lab { color: var(--good); font-weight: 600; }
+.stat.is-freed .v { color: var(--good); }
 
 /* ---------- chart ---------- */
 .card { border: 1px solid var(--rule); border-radius: 4px; background: var(--panel); padding: 18px 20px 14px; }
@@ -236,8 +242,8 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
     <div class="stats" id="stats"></div>
 
     <div class="sec-head" style="margin-top:26px">
-      <h2 style="font-size:17px">處置中與即將開始的標的</h2>
-      <p>依解除日排序。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。<span id="live-note"></span></p>
+      <h2 style="font-size:17px">今日出關、處置中與即將開始的標的</h2>
+      <p>依解除日排序，今日出關的排在最前。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。<span id="live-note"></span></p>
       <label class="toggle"><input type="checkbox" id="show-derivs"> 一併顯示權證與可轉債</label>
     </div>
     <div class="tablewrap">
@@ -271,7 +277,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
   <section id="all">
     <div class="sec-head">
       <h2>完整公告明細</h2>
-      <p>點任一列可展開公告原文摘要。</p>
+      <p>點任一列可展開公告原文摘要。<span id="all-note"></span></p>
     </div>
     <div class="filters">
       <label>市場 <select id="f-market"><option value="">全部</option><option>上市</option><option>上櫃</option></select></label>
@@ -280,7 +286,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
       <label>層級 <select id="f-round"><option value="">全部</option><option value="1">第一次</option><option value="2">第二次</option></select></label>
       <label>預收 <select id="f-prepay"><option value="">全部</option><option value="全面">全面</option><option value="條件">條件</option></select></label>
       <label>股期 <select id="f-fut"><option value="">全部</option><option value="1">有</option><option value="0">無</option></select></label>
-      <label>狀態 <select id="f-state"><option value="">全部</option><option value="live">處置中</option><option value="soon">即將開始</option><option value="done">已結束</option></select></label>
+      <label>狀態 <select id="f-state"><option value="">全部</option><option value="live">處置中</option><option value="soon">即將開始</option><option value="freed">今日出關</option><option value="done">已結束</option></select></label>
       <input type="search" id="f-q" placeholder="代號或名稱" aria-label="搜尋代號或名稱">
       <span class="count" id="f-count"></span>
     </div>
@@ -330,7 +336,14 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
   function dayDiff(a, b) {
     return Math.round((Date.parse(b + "T00:00:00") - Date.parse(a + "T00:00:00")) / 86400000);
   }
-  function state(r) { return r.active ? "live" : (r.upcoming ? "soon" : "done"); }
+  function state(r) {
+    if (r.active) return "live";
+    if (r.upcoming) return "soon";
+    // 該股身上若還有另一張處置，這張雖已期滿也不算出關（busy 在下方 stat strip 建立）
+    if (r.release === TODAY && !busy[r.market + "|" + r.code]) return "freed";
+    return "done";
+  }
+  var STATE_LABEL = { live: "處置中", soon: "即將開始", freed: "今日出關" };
   function intervalText(r) { return r.interval_min == null ? "—" : r.interval_min + " 分"; }
   function marketCell(m) {
     var s = el("span", m === "上櫃" ? "mk otc" : "mk");
@@ -404,18 +417,29 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
   // ---------- stat strip ----------
   var live = mergeOrders(rows.filter(function (r) { return r.active; }));
   var soon = mergeOrders(rows.filter(function (r) { return r.upcoming; }));
+
+  // 今日出關＝處置期滿，今天是第一個可正常交易的日子。
+  // 必須排除身上還有另一張處置的個股，否則會一邊出關一邊還在處置。
+  var busy = {};
+  live.concat(soon).forEach(function (r) { busy[r.market + "|" + r.code] = 1; });
+  var freed = mergeOrders(rows.filter(function (r) {
+    return !r.active && !r.upcoming && r.release === TODAY;
+  })).filter(function (r) { return !busy[r.market + "|" + r.code]; });
+  freed.forEach(function (r) { r.freed = true; });
+
   var liveStock = live.filter(function (r) { return r.type === "股票"; });
+  var freedStock = freed.filter(function (r) { return r.type === "股票"; });
   var payAll = liveStock.filter(function (r) { return r.prepay === "全面"; }).length;
   var lastDay = liveStock.filter(function (r) { return r.end === TODAY; }).length;
   var listed = rows.filter(function (r) { return r.market === "上市"; }).length;
   var otc = rows.length - listed;
 
-  [["處置中 · 普通股", liveStock.length, (live.length - liveStock.length) + " 檔權證與可轉債另計", true],
-   ["需全面預收", payAll, "委託不分大小一律圈存", false],
-   ["今日最後一天", lastDay, "次一交易日起恢復", false],
-   ["一年內公告", rows.length, "上市 " + listed + " ： 上櫃 " + otc, false]
+  [["處置中 · 普通股", liveStock.length, (live.length - liveStock.length) + " 檔權證與可轉債另計", "is-live"],
+   ["需全面預收", payAll, "委託不分大小一律圈存", ""],
+   ["今日最後一天", lastDay, "次一交易日起恢復", ""],
+   ["今日出關", freedStock.length, "今天起恢復正常交易", "is-freed"]
   ].forEach(function (s) {
-    var c = el("div", "stat" + (s[3] ? " is-live" : ""));
+    var c = el("div", "stat" + (s[3] ? " " + s[3] : ""));
     c.appendChild(el("div", "k", s[0]));
     c.appendChild(el("div", "v", String(s[1])));
     c.appendChild(el("div", "n", s[2]));
@@ -450,7 +474,8 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
 
   function renderLive() {
     var withDerivs = $("show-derivs").checked;
-    var list = live.concat(soon)
+    // 依 end 排序，今日出關的（處置迄日最早）自然排在最前面
+    var list = freed.concat(live, soon)
       .filter(function (r) { return withDerivs || r.type === "股票"; })
       .sort(function (a, b) {
         return (a.end || "").localeCompare(b.end || "") || a.code.localeCompare(b.code);
@@ -487,7 +512,11 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
 
       var tdRel = el("td");
       var box = el("div", "rel");
-      if (r.upcoming) {
+      if (r.freed) {
+        box.className = "rel freed";
+        box.appendChild(el("span", "lab", "今日出關"));
+        box.appendChild(el("span", "out", roc(TODAY) + " 起正常交易"));
+      } else if (r.upcoming) {
         box.appendChild(el("span", "lab", dayDiff(TODAY, r.start) + " 天後開始"));
         box.appendChild(el("span", "out", roc(r.start) + " 起算"));
       } else {
@@ -512,6 +541,9 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
   }
   $("show-derivs").addEventListener("change", renderLive);
   renderLive();
+
+  $("all-note").textContent = "　統計區間內共 " + rows.length + " 件公告，上市 "
+    + listed + " ： 上櫃 " + otc + "；同一檔多次被處置分別計次。";
 
   $("live-note").textContent = "　處置中的 " + liveStock.length + " 檔普通股裡，"
     + liveStock.filter(function (r) { return r.has_future; }).length
@@ -645,7 +677,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
       var tdD = el("td", "dt");
       tdD.appendChild(document.createTextNode(roc(r.start) + " – " + roc(r.end) + " "));
       var s = state(r);
-      if (s !== "done") tdD.appendChild(el("span", s === "live" ? "pill live" : "pill soon", s === "live" ? "處置中" : "即將開始"));
+      if (STATE_LABEL[s]) tdD.appendChild(el("span", "pill " + s, STATE_LABEL[s]));
       tr.appendChild(tdD);
       tr.appendChild(el("td", "num", r.cumulative == null ? "—" : String(r.cumulative)));
 
