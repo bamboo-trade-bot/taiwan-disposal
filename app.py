@@ -87,8 +87,9 @@ class Cache(object):
             if self.payload is None or self.fetched_at is None:
                 return True
             age = (dt.datetime.now() - self.fetched_at).total_seconds()
-            # 換日後 active/upcoming 的判定會過期，所以跨日也算過期
-            return age > self.ttl or self.payload.get("today") != dt.date.today().isoformat()
+            # 換日後 active/upcoming 的判定會過期，所以跨日也算過期（以台北時間為準）
+            return (age > self.ttl
+                    or self.payload.get("today") != fetch_disposal.taipei_today().isoformat())
 
     def status(self):
         with self.lock:

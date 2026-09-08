@@ -23,6 +23,21 @@ import time
 import urllib.request
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+# 一律以台北時間判定「今天」。CI runner 跑在 UTC，直接用 date.today() 會在
+# 台北凌晨 00:00–08:00 之間拿到前一天，讓「處置中／今日最後一天」整個錯開。
+# 台灣沒有日光節約時間，固定 UTC+8 即可，不必依賴 tzdata。
+TW_TZ = dt.timezone(dt.timedelta(hours=8))
+
+
+def taipei_now():
+    return dt.datetime.now(TW_TZ).replace(tzinfo=None)
+
+
+def taipei_today():
+    return taipei_now().date()
+
+
 TWSE_URL = "https://www.twse.com.tw/rwd/zh/announcement/punish?startDate={a}&endDate={b}&response=json"
 TPEX_URL = "https://www.tpex.org.tw/www/zh-tw/bulletin/disposal?startDate={a}&endDate={b}&response=json"
 TPEX_REFERER = "https://www.tpex.org.tw/zh-tw/announce/market/disposal.html"
@@ -417,7 +432,7 @@ def enrich(rows, today, holidays=None, futures=None):
 
 def resolve_range(months=12, start=None, end=None, today=None):
     """把 --months / --start / --end 換算成實際的起訖日。"""
-    today = today or dt.date.today()
+    today = today or taipei_today()
     end = dt.date.fromisoformat(end) if end else today
     if start:
         return dt.date.fromisoformat(start), end
@@ -430,7 +445,7 @@ def resolve_range(months=12, start=None, end=None, today=None):
 
 def collect(start, end, today=None, log=None):
     """抓取並正規化兩個市場的處置公告，回傳可直接序列化的 payload。"""
-    today = today or dt.date.today()
+    today = today or taipei_today()
     log = log or (lambda msg: None)
 
     log("range %s ~ %s" % (start, end))
@@ -446,7 +461,7 @@ def collect(start, end, today=None, log=None):
 
     rows = enrich(twse + tpex, today.isoformat(), holidays, futures)
     return {
-        "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
+        "generated_at": taipei_now().isoformat(timespec="seconds"),
         "today": today.isoformat(),
         "calendar_ok": calendar_ok,
         "range": {"start": start.isoformat(), "end": end.isoformat()},
