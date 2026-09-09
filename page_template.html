@@ -194,11 +194,16 @@ td.dt { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); whit
 .q .qb.down { background: var(--down); color: var(--panel); }
 .q .qnone { font-family: var(--f-mono); font-size: 12px; color: var(--ink-3); }
 
-/* 自高點回落。永遠是 0 或負值，所以不用漲跌雙色，只用跌色表示幅度 */
-.dd { display: flex; flex-direction: column; gap: 2px; min-width: 92px; }
-.dd .ddp { font-family: var(--f-mono); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--down); }
-.dd .ddp.zero { color: var(--ink-3); font-weight: 500; }
+/* 相對進處置前的漲跌。可正可負，沿用台股紅漲綠跌 */
+.dd { display: flex; flex-direction: column; gap: 2px; min-width: 100px; }
+.dd .ddp { font-family: var(--f-mono); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dd .ddp.up { color: var(--up); }
+.dd .ddp.down { color: var(--down); }
+.dd .ddp.flat { color: var(--ink-3); font-weight: 500; }
 .dd .ddh { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+
+/* 同時受多張處置公告拘束 */
+.fut.multi { border-color: var(--accent); color: var(--accent); }
 .qstamp { font-family: var(--f-mono); font-size: 12px; color: var(--ink-3); margin-left: auto; }
 .qstamp.err { color: var(--up); }
 
@@ -283,7 +288,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
           <tr>
             <th>市場</th><th>代號</th><th>名稱</th><th>類型</th>
             <th class="q-col" hidden>報價</th>
-            <th id="dd-th">回落</th>
+            <th>較處置前</th>
             <th>層級</th><th class="num">撮合</th><th>預收款券</th>
             <th>處置期間</th><th>解除</th>
           </tr>
@@ -421,7 +426,6 @@ window.QUOTE_API = /*__QUOTE_API__*/;
   $("s-today").textContent = roc(TODAY) + "（" + TODAY + "）";
   $("s-range").textContent = roc(D.range.start) + " – " + roc(D.range.end);
   $("s-gen").textContent = D.generated_at.replace("T", " ");
-  $("dd-th").textContent = (D.drawdown_days || 14) + " 日回落";
 
   // ---------- 合併重疊公告 ----------
   // 同一檔可能同時被多張處置公告拘束（前一次還沒結束又接了一次）。實際受限的是其中
@@ -499,6 +503,12 @@ window.QUOTE_API = /*__QUOTE_API__*/;
       b.title = "有股票期貨掛牌。處置期間現股受人工撮合與預收限制，股期仍照常連續交易";
       td.appendChild(b);
     }
+    if (r.orders > 1) {
+      var m = el("span", "fut multi", "×" + r.orders);
+      m.title = "此檔同時受 " + r.orders + " 張處置公告拘束（前一次未結束又接一次），"
+        + "本列已合併並取其中最嚴格的條件";
+      td.appendChild(m);
+    }
     return td;
   }
   // ---------- 報價（漸進增強：沒設端點就整欄不存在） ----------
@@ -532,32 +542,24 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     var key = td.getAttribute("data-ddkey");
     var r = liveByKey[key];
     box.innerHTML = "";
-    if (!r || r.high_n == null) {
+    if (!r || r.pre_close == null) {
       box.appendChild(el("span", "qnone", "—"));
       return;
     }
-    // 日線只到昨天，今天的盤中高點要一起納入，否則創新高時會算出正的回落
-    var high = r.high_n, hdate = r.high_n_date;
-    if (q && q.high != null && q.high > high) {
-      high = q.high;
-      hdate = null;                             // 高點是今天創的
-    }
-
-    // 與報價欄用同一套取價，否則會發生「今天的高點配昨天的收盤」這種混算
+    // 與報價欄用同一套取價，兩欄才不會各算各的
     var price = effectivePrice(key, q, r).price;
     if (price == null) {
       box.appendChild(el("span", "qnone", "—"));
-      box.appendChild(el("span", "ddh", "高 " + high));
+      box.appendChild(el("span", "ddh", "基準 " + r.pre_close));
       return;
     }
 
-    var pct = 100 * (price - high) / high;
-    if (pct > 0) pct = 0;                       // 已站上區間高點，回落視為 0
-    var zero = pct > -0.05;
-    box.appendChild(el("span", "ddp" + (zero ? " zero" : ""),
-      zero ? "0.0%" : pct.toFixed(1) + "%"));
+    var pct = 100 * (price - r.pre_close) / r.pre_close;
+    var dir = pct > 0.05 ? "up" : (pct < -0.05 ? "down" : "flat");
+    box.appendChild(el("span", "ddp " + dir,
+      (pct > 0 ? "+" : "") + pct.toFixed(1) + "%"));
     box.appendChild(el("span", "ddh",
-      "高 " + high + "　" + (hdate ? hdate.slice(5).replace("-", "/") : "今日")));
+      "基準 " + r.pre_close + "　" + r.pre_close_date.slice(5).replace("-", "/")));
   }
 
   function repaintDrawdowns(quotes) {
@@ -698,14 +700,7 @@ window.QUOTE_API = /*__QUOTE_API__*/;
       tr.appendChild(el("td", "num", intervalText(r)));
       tr.appendChild(payCell(r));
 
-      var tdD = el("td", "dt");
-      tdD.appendChild(document.createTextNode(roc(r.start) + " – " + roc(r.end) + " "));
-      if (r.orders > 1) {
-        var pm = el("span", "pill", r.orders + " 張公告");
-        pm.title = "此檔同時受多張處置公告拘束，表中取其中最嚴格的條件";
-        tdD.appendChild(pm);
-      }
-      tr.appendChild(tdD);
+      tr.appendChild(el("td", "dt", roc(r.start) + " – " + roc(r.end)));
 
       var tdRel = el("td");
       var box = el("div", "rel");

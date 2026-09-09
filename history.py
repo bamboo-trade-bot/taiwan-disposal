@@ -1,25 +1,21 @@
 # -*- coding: utf-8 -*-
-"""個股日線，用來算「N 個交易日內從高點回落幾 %」。
+"""個股日線，用來取「進處置前一個交易日的收盤價」當作比較基準。
 
 來源
   上市 https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date=YYYYMM01&stockNo=XXXX&response=json
-  上櫃 https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock?code=XXXX&date=YYYY/MM/DD&response=json
+  上櫃 https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock?code=XXXX&date=YYYY/MM/01&response=json
 
-兩邊都是「一次一個月、一次一檔」，欄位順序也幾乎一樣：
+兩邊都是「一次一檔一個月」，欄位順序也幾乎一樣：
   日期｜成交量｜成交金額｜開盤｜最高｜最低｜收盤｜漲跌｜筆數
-高點取的是盤中最高價（索引 4），不是收盤價——回落幅度本來就該從盤中高點起算。
 """
-import datetime as dt
-import re
-
-from fetch_disposal import UA, TPEX_REFERER, get_json, roc_to_iso
+from fetch_disposal import TPEX_REFERER, get_json, roc_to_iso
 
 TWSE_DAY = ("https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
             "?date={ym}01&stockNo={code}&response=json")
 TPEX_DAY = ("https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock"
             "?code={code}&date={y}/{m}/01&response=json")
 
-MAX_MONTHS = 3          # 往回抓幾個月就該夠 14 個交易日了
+MAX_MONTHS = 4          # 處置起算日若落在月初，前一交易日會在上個月
 
 
 def _f(v):
@@ -58,13 +54,18 @@ def _month_back(year, month, n):
     return year, m
 
 
-def daily_bars(code, market, today, days=14):
-    """回傳最近 days 個交易日的 [(iso日期, 最高價, 收盤價)]，新到舊。
+def baseline(code, market, today, start_iso):
+    """回傳 {pre_close, pre_close_date, last_close}。
 
-    取不到就回空清單，呼叫端自行處理。
+    pre_close 是處置起算日「前一個交易日」的收盤價，也就是這檔進處置之前
+    最後一個正常交易日的價格；頁面用它當漲跌基準。
+    取不到就回 None，呼叫端自行處理。
     """
     fetch = _rows_twse if market == "上市" else _rows_tpex
-    seen, bars = set(), []
+    seen = set()
+    pre = None          # (iso, close) 早於起算日、且最接近的那一天
+    last = None         # (iso, close) 整體最新的一天
+
     for back in range(MAX_MONTHS):
         y, m = _month_back(today.year, today.month, back)
         try:
@@ -75,28 +76,20 @@ def daily_bars(code, market, today, days=14):
             if len(r) < 7:
                 continue
             iso = roc_to_iso(r[0])
-            if not iso or iso in seen or iso > today.isoformat():
-                continue
-            high, close = _f(r[4]), _f(r[6])
-            if high is None:
+            close = _f(r[6])
+            if not iso or close is None or iso in seen or iso > today.isoformat():
                 continue
             seen.add(iso)
-            bars.append((iso, high, close))
-        if len(bars) >= days:
+            if last is None or iso > last[0]:
+                last = (iso, close)
+            if start_iso and iso < start_iso and (pre is None or iso > pre[0]):
+                pre = (iso, close)
+        # 已經找到起算日之前的交易日就不必再往回抓
+        if pre is not None or not start_iso:
             break
-    bars.sort(reverse=True)
-    return bars[:days]
 
-
-def drawdown(code, market, today, days=14):
-    """回傳 {high, high_date, last_close, bars} ；資料不足時 high 為 None。"""
-    bars = daily_bars(code, market, today, days)
-    if not bars:
-        return {"high": None, "high_date": None, "last_close": None, "bars": 0}
-    top = max(bars, key=lambda b: b[1])
     return {
-        "high": round(top[1], 4),
-        "high_date": top[0],
-        "last_close": bars[0][2],
-        "bars": len(bars),
+        "pre_close": round(pre[1], 4) if pre else None,
+        "pre_close_date": pre[0] if pre else None,
+        "last_close": last[1] if last else None,
     }

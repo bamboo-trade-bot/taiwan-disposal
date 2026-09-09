@@ -447,44 +447,42 @@ def enrich(rows, today, holidays=None, futures=None):
     return rows
 
 
-DRAWDOWN_DAYS = 14
+def attach_baseline(rows, today, log):
+    """替現況清單的普通股補上「進處置前一個交易日的收盤價」。
 
-
-def attach_drawdown(rows, today, log):
-    """替現況清單的普通股補上 N 個交易日高點，供頁面計算回落幅度。
+    基準取該檔目前這一段處置的**最早起算日**再往前一個交易日：像雙鴻這種
+    前一次還沒結束又接一次的，要從整段的起點量，而不是從最後那張公告量。
 
     只抓現在還在處置（或今日出關）的普通股：日線是一檔一個月一次請求，
-    對整年 1200 多筆公告全抓沒有意義，而且權證與可轉債算回落也沒有意義。
+    對整年 1200 多筆公告全抓沒有意義，權證與可轉債也不需要。
     """
     # history 需要本模組的 get_json 等工具，放在函式內匯入以避免循環匯入
     import history
 
     iso = today.isoformat()
-    watch = []
-    seen = set()
+    starts = {}
     for r in rows:
         if r["type"] != "股票":
             continue
         if not (r["active"] or r["upcoming"] or r["release"] == iso):
             continue
         key = (r["market"], r["code"])
-        if key not in seen:
-            seen.add(key)
-            watch.append(key)
+        if r["start"] and (key not in starts or r["start"] < starts[key]):
+            starts[key] = r["start"]
 
-    log("drawdown: %d securities x %d days" % (len(watch), DRAWDOWN_DAYS))
-    hist = {}
-    for market, code in watch:
+    log("baseline: %d securities" % len(starts))
+    base = {}
+    for (market, code), start in starts.items():
         try:
-            hist[(market, code)] = history.drawdown(code, market, today, DRAWDOWN_DAYS)
+            base[(market, code)] = history.baseline(code, market, today, start)
         except Exception as e:
-            log("drawdown %s %s failed: %s" % (market, code, e))
+            log("baseline %s %s failed: %s" % (market, code, e))
 
     for r in rows:
-        h = hist.get((r["market"], r["code"]))
-        r["high_n"] = h["high"] if h else None
-        r["high_n_date"] = h["high_date"] if h else None
-        r["last_close"] = h["last_close"] if h else None
+        b = base.get((r["market"], r["code"]))
+        r["pre_close"] = b["pre_close"] if b else None
+        r["pre_close_date"] = b["pre_close_date"] if b else None
+        r["last_close"] = b["last_close"] if b else None
     return rows
 
 
@@ -518,20 +516,19 @@ def collect(start, end, today=None, log=None):
     futures = fetch_stock_futures(log)
 
     rows = enrich(twse + tpex, today.isoformat(), holidays, futures)
-    # 回落是加值資訊，不該有能力弄垮整個建置：失敗就少一欄，核心資料照常產出
+    # 基準價是加值資訊，不該有能力弄垮整個建置：失敗就少一欄，核心資料照常產出
     try:
-        attach_drawdown(rows, today, log)
+        attach_baseline(rows, today, log)
     except Exception as e:
-        log("drawdown step skipped: %s: %s" % (type(e).__name__, e))
+        log("baseline step skipped: %s: %s" % (type(e).__name__, e))
         for r in rows:
-            r.setdefault("high_n", None)
-            r.setdefault("high_n_date", None)
+            r.setdefault("pre_close", None)
+            r.setdefault("pre_close_date", None)
             r.setdefault("last_close", None)
     return {
         "generated_at": taipei_now().isoformat(timespec="seconds"),
         "today": today.isoformat(),
         "calendar_ok": calendar_ok,
-        "drawdown_days": DRAWDOWN_DAYS,
         # 前端據此決定盤中要不要輪詢報價
         "is_trading_day": today.weekday() < 5 and today.isoformat() not in holidays,
         "range": {"start": start.isoformat(), "end": end.isoformat()},
