@@ -125,7 +125,7 @@ section { margin-top: 44px; }
 .tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--panel); }
 table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
 /* 欄位多，視窗變窄時讓容器橫向捲動，不要把儲存格擠成好幾行高 */
-#live-table { min-width: 940px; }
+#live-table { min-width: 1120px; }
 #all-table { min-width: 1040px; }
 thead th {
   position: sticky; top: 0; background: var(--panel-2); text-align: left;
@@ -193,6 +193,12 @@ td.dt { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); whit
 .q .qb.up { background: var(--up); color: var(--panel); }
 .q .qb.down { background: var(--down); color: var(--panel); }
 .q .qnone { font-family: var(--f-mono); font-size: 12px; color: var(--ink-3); }
+
+/* 自高點回落。永遠是 0 或負值，所以不用漲跌雙色，只用跌色表示幅度 */
+.dd { display: flex; flex-direction: column; gap: 2px; min-width: 92px; }
+.dd .ddp { font-family: var(--f-mono); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--down); }
+.dd .ddp.zero { color: var(--ink-3); font-weight: 500; }
+.dd .ddh { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 .qstamp { font-family: var(--f-mono); font-size: 12px; color: var(--ink-3); margin-left: auto; }
 .qstamp.err { color: var(--up); }
 
@@ -277,6 +283,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
           <tr>
             <th>市場</th><th>代號</th><th>名稱</th><th>類型</th>
             <th class="q-col" hidden>報價</th>
+            <th id="dd-th">回落</th>
             <th>處置原因</th><th>層級</th><th class="num">撮合</th><th>預收款券</th>
             <th>處置期間</th><th>解除</th>
           </tr>
@@ -414,6 +421,7 @@ window.QUOTE_API = /*__QUOTE_API__*/;
   $("s-today").textContent = roc(TODAY) + "（" + TODAY + "）";
   $("s-range").textContent = roc(D.range.start) + " – " + roc(D.range.end);
   $("s-gen").textContent = D.generated_at.replace("T", " ");
+  $("dd-th").textContent = (D.drawdown_days || 14) + " 日回落";
 
   // ---------- 合併重疊公告 ----------
   // 同一檔可能同時被多張處置公告拘束（前一次還沒結束又接了一次）。實際受限的是其中
@@ -508,7 +516,70 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     return td;
   }
 
+  // ---------- 自高點回落 ----------
+  var liveByKey = {};        // 目前清單上的列，回落要用到 high_n / last_close
+
+  function drawdownCell(r) {
+    var td = el("td");
+    td.className = "dd-col";
+    td.setAttribute("data-ddkey", quoteKey(r));
+    td.appendChild(el("div", "dd"));
+    return td;
+  }
+
+  function paintDrawdown(td, q) {
+    var box = td.firstChild;
+    var key = td.getAttribute("data-ddkey");
+    var r = liveByKey[key];
+    box.innerHTML = "";
+    if (!r || r.high_n == null) {
+      box.appendChild(el("span", "qnone", "—"));
+      return;
+    }
+    // 日線只到昨天，今天的盤中高點要一起納入，否則創新高時會算出正的回落
+    var high = r.high_n, hdate = r.high_n_date;
+    if (q && q.high != null && q.high > high) {
+      high = q.high;
+      hdate = null;                             // 高點是今天創的
+    }
+
+    // 與報價欄用同一套取價，否則會發生「今天的高點配昨天的收盤」這種混算
+    var price = effectivePrice(key, q, r).price;
+    if (price == null) {
+      box.appendChild(el("span", "qnone", "—"));
+      box.appendChild(el("span", "ddh", "高 " + high));
+      return;
+    }
+
+    var pct = 100 * (price - high) / high;
+    if (pct > 0) pct = 0;                       // 已站上區間高點，回落視為 0
+    var zero = pct > -0.05;
+    box.appendChild(el("span", "ddp" + (zero ? " zero" : ""),
+      zero ? "0.0%" : pct.toFixed(1) + "%"));
+    box.appendChild(el("span", "ddh",
+      "高 " + high + "　" + (hdate ? hdate.slice(5).replace("-", "/") : "今日")));
+  }
+
+  function repaintDrawdowns(quotes) {
+    [].slice.call(document.querySelectorAll("#live-table td.dd-col")).forEach(function (td) {
+      paintDrawdown(td, quotes ? quotes[td.getAttribute("data-ddkey")] : null);
+    });
+  }
+
   var lastPrice = {};        // 撮合空檔時沿用上一次看到的價，避免畫面一直閃成空白
+
+  /** 這一檔現在該用哪個價。報價欄與回落欄共用，兩邊才不會各算各的。
+   *  今天完全沒成交的不能拿掛單價當價格，否則會被讀成成交價。 */
+  function effectivePrice(key, q, r) {
+    if (q && q.price != null) {
+      lastPrice[key] = q.price;
+      return { price: q.price, note: null };
+    }
+    if (lastPrice[key] != null) return { price: lastPrice[key], note: null };
+    if (q && q.traded && q.bid != null) return { price: q.bid, note: "買價" };
+    if (q && q.traded && q.ask != null) return { price: q.ask, note: "賣價" };
+    return { price: r ? r.last_close : null, note: r && r.last_close != null ? "昨收" : null };
+  }
 
   function paintQuote(td, q) {
     var box = td.firstChild;
@@ -516,18 +587,9 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     box.innerHTML = "";
     if (!q) { box.appendChild(el("span", "qnone", "—")); return; }
 
-    var shown = null, note = null;
-    if (q.price != null) {
-      shown = q.price;
-      lastPrice[key] = q.price;
-    } else if (lastPrice[key] != null) {
-      shown = lastPrice[key];
-    } else if (q.traded && q.bid != null) {
-      shown = q.bid; note = "買價";       // 漲停鎖死時沒有成交價，但買方掛在漲停
-    } else if (q.traded && q.ask != null) {
-      shown = q.ask; note = "賣價";
-    }
-    // 今天完全沒成交的，不能拿掛單價當價格顯示，否則會被讀成成交價
+    var got = effectivePrice(key, q, liveByKey[key]);
+    var shown = got.price, note = got.note;
+    if (!q.traded && note === "昨收") shown = null;   // 今天沒成交就明講，不顯示昨收充數
 
     if (shown == null) {
       box.appendChild(el("span", "qnone", q.traded ? "—" : "尚無成交"));
@@ -570,6 +632,7 @@ window.QUOTE_API = /*__QUOTE_API__*/;
       .then(function (j) {
         var q = j.quotes || {};
         cells.forEach(function (td) { paintQuote(td, q[td.getAttribute("data-qkey")]); });
+        repaintDrawdowns(q);     // 回落要用即時價與今天的盤中高點重算
         var first = Object.keys(q)[0];
         var stamp = $("qstamp");
         stamp.className = "qstamp";
@@ -611,11 +674,14 @@ window.QUOTE_API = /*__QUOTE_API__*/;
         return (a.end || "").localeCompare(b.end || "") || a.code.localeCompare(b.code);
       });
 
+    liveByKey = {};
+    list.forEach(function (r) { liveByKey[quoteKey(r)] = r; });
+
     lbody.innerHTML = "";
     if (!list.length) {
       var tr0 = el("tr");
       var td0 = el("td", "", "資料截止日沒有處置中的標的。");
-      td0.colSpan = 11; td0.style.color = "var(--ink-2)"; td0.style.padding = "22px";
+      td0.colSpan = 12; td0.style.color = "var(--ink-2)"; td0.style.padding = "22px";
       tr0.appendChild(td0); lbody.appendChild(tr0);
       return;
     }
@@ -627,6 +693,7 @@ window.QUOTE_API = /*__QUOTE_API__*/;
       tr.appendChild(nameCell(r));
       tr.appendChild(el("td", "", r.type));
       tr.appendChild(quoteCell(r));
+      tr.appendChild(drawdownCell(r));
       tr.appendChild(el("td", "", r.reason));
       var tdR = el("td"); tdR.appendChild(roundPill(r)); tr.appendChild(tdR);
       tr.appendChild(el("td", "num", intervalText(r)));
@@ -669,6 +736,8 @@ window.QUOTE_API = /*__QUOTE_API__*/;
       tr.appendChild(tdRel);
       lbody.appendChild(tr);
     });
+
+    repaintDrawdowns(null);      // 先用最後收盤畫，報價回來後會再刷一次
   }
   $("show-derivs").addEventListener("change", function () {
     renderLive();

@@ -430,6 +430,47 @@ def enrich(rows, today, holidays=None, futures=None):
     return rows
 
 
+DRAWDOWN_DAYS = 14
+
+
+def attach_drawdown(rows, today, log):
+    """替現況清單的普通股補上 N 個交易日高點，供頁面計算回落幅度。
+
+    只抓現在還在處置（或今日出關）的普通股：日線是一檔一個月一次請求，
+    對整年 1200 多筆公告全抓沒有意義，而且權證與可轉債算回落也沒有意義。
+    """
+    # history 需要本模組的 get_json 等工具，放在函式內匯入以避免循環匯入
+    import history
+
+    iso = today.isoformat()
+    watch = []
+    seen = set()
+    for r in rows:
+        if r["type"] != "股票":
+            continue
+        if not (r["active"] or r["upcoming"] or r["release"] == iso):
+            continue
+        key = (r["market"], r["code"])
+        if key not in seen:
+            seen.add(key)
+            watch.append(key)
+
+    log("drawdown: %d securities x %d days" % (len(watch), DRAWDOWN_DAYS))
+    hist = {}
+    for market, code in watch:
+        try:
+            hist[(market, code)] = history.drawdown(code, market, today, DRAWDOWN_DAYS)
+        except Exception as e:
+            log("drawdown %s %s failed: %s" % (market, code, e))
+
+    for r in rows:
+        h = hist.get((r["market"], r["code"]))
+        r["high_n"] = h["high"] if h else None
+        r["high_n_date"] = h["high_date"] if h else None
+        r["last_close"] = h["last_close"] if h else None
+    return rows
+
+
 def resolve_range(months=12, start=None, end=None, today=None):
     """把 --months / --start / --end 換算成實際的起訖日。"""
     today = today or taipei_today()
@@ -460,10 +501,12 @@ def collect(start, end, today=None, log=None):
     futures = fetch_stock_futures(log)
 
     rows = enrich(twse + tpex, today.isoformat(), holidays, futures)
+    attach_drawdown(rows, today, log)
     return {
         "generated_at": taipei_now().isoformat(timespec="seconds"),
         "today": today.isoformat(),
         "calendar_ok": calendar_ok,
+        "drawdown_days": DRAWDOWN_DAYS,
         # 前端據此決定盤中要不要輪詢報價
         "is_trading_day": today.weekday() < 5 and today.isoformat() not in holidays,
         "range": {"start": start.isoformat(), "end": end.isoformat()},

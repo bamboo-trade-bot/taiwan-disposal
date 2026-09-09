@@ -106,6 +106,33 @@ python fetch_disposal.py && python build_page.py
 
 ---
 
+## 自高點回落
+
+現況清單會顯示每檔「**14 個交易日內從高點回落幾 %**」。
+
+定義：
+
+- **14 天指交易日**，不是日曆日（整頁都以營業日為單位）
+- **高點取盤中最高價**，不是收盤價——回落本來就該從盤中高點起算
+- 日線只到昨天，所以**今天的盤中高點會一起納入**，否則當天創新高時會算出正的回落
+- 現價優先用即時報價，因此盤中會跟著跳動；沒有報價時退回最後收盤
+- 價格已站上區間高點時回落顯示 `0.0%`，高點日期標「今日」
+
+天數由 `fetch_disposal.py` 的 `DRAWDOWN_DAYS` 控制，表頭文字會跟著變。
+
+日線來源是「一次一檔一個月」，所以**只抓現況清單上的普通股**（約 17 檔、30 多次請求）。
+對整年 1200 多筆公告全抓沒有意義，權證與可轉債算回落也沒有意義。
+
+| 市場 | API |
+|---|---|
+| 上市 | `twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date=YYYYMM01&stockNo=XXXX&response=json` |
+| 上櫃 | `tpex.org.tw/www/zh-tw/afterTrading/tradingStock?code=XXXX&date=YYYY/MM/01&response=json` |
+
+兩邊欄位順序幾乎一樣：日期｜成交量｜成交金額｜開盤｜**最高**｜最低｜收盤｜漲跌｜筆數。
+
+> 報價欄與回落欄共用同一個 `effectivePrice()` 取價。這不是潔癖——兩邊各自取價時，
+> 曾出現「拿今天的高點配昨天的收盤」而算出 −9% 的錯誤，實際上該檔正停在當日最高價。
+
 ## 即時報價（選用）
 
 頁面可以顯示現況清單的即時報價。**沒設定報價端點時整欄不存在**，行為與沒有這功能時
@@ -159,6 +186,7 @@ repo 的 **Settings → Secrets and variables → Actions → Variables**，變�
 | `.github/workflows/deploy.yml` | 排程抓取、建置並發佈到 GitHub Pages |
 | `app.py` | HTTP 伺服器：頁面、JSON API、快取與背景更新 |
 | `quotes.py` | 證交所 MIS 即時報價，供 `app.py` 的 `/api/quotes` 使用 |
+| `history.py` | 個股日線，用來算 N 個交易日內的高點 |
 | `worker/` | Cloudflare Worker 版的報價 proxy，給公開站用 |
 | `fetch_disposal.py` | 抓取兩個來源、正規化欄位，輸出 `disposal_data.json` |
 | `build_page.py` | 把資料內嵌進 `page_template.html`；`app.py` 也是呼叫這裡的 `render()` |
