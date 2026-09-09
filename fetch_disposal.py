@@ -46,20 +46,37 @@ HOLIDAY_URL = ("https://www.twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule"
 TAIFEX_URL = "https://www.taifex.com.tw/cht/2/stockLists"
 
 
-def get_json(url, referer=None, retries=3):
+# 一次建置會打六十幾次請求。CI 跑在境外 IP，對來源網站而言比本機更容易被
+# 限速或逾時，所以請求之間留間隔，失敗則指數退避。
+THROTTLE_SECONDS = 0.35
+_last_request_at = [0.0]
+
+
+def _throttle():
+    gap = time.time() - _last_request_at[0]
+    if gap < THROTTLE_SECONDS:
+        time.sleep(THROTTLE_SECONDS - gap)
+    _last_request_at[0] = time.time()
+
+
+def get_json(url, referer=None, retries=4):
     headers = dict(UA)
     if referer:
         headers["Referer"] = referer
     last = None
     for i in range(retries):
+        _throttle()
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=45) as r:
                 return json.loads(r.read().decode("utf-8"))
-        except Exception as e:  # 連線不穩時退避重試
+        except Exception as e:
             last = e
-            time.sleep(1.5 * (i + 1))
-    raise RuntimeError("fetch failed: %s (%s)" % (url, last))
+            if i < retries - 1:
+                time.sleep(min(25, 2 ** (i + 1)))     # 2、4、8 秒
+    # 訊息帶出網址與例外型別，CI 日誌才看得出是哪一支 API、哪一種失敗
+    raise RuntimeError("fetch failed after %d tries: %s (%s: %s)"
+                       % (retries, url, type(last).__name__, last))
 
 
 # ---------- 共用工具 ----------
@@ -501,7 +518,15 @@ def collect(start, end, today=None, log=None):
     futures = fetch_stock_futures(log)
 
     rows = enrich(twse + tpex, today.isoformat(), holidays, futures)
-    attach_drawdown(rows, today, log)
+    # 回落是加值資訊，不該有能力弄垮整個建置：失敗就少一欄，核心資料照常產出
+    try:
+        attach_drawdown(rows, today, log)
+    except Exception as e:
+        log("drawdown step skipped: %s: %s" % (type(e).__name__, e))
+        for r in rows:
+            r.setdefault("high_n", None)
+            r.setdefault("high_n_date", None)
+            r.setdefault("last_close", None)
     return {
         "generated_at": taipei_now().isoformat(timespec="seconds"),
         "today": today.isoformat(),
