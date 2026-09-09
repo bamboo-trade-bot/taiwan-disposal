@@ -40,6 +40,11 @@ jobs:
         run: python fetch_disposal.py --months "${{ github.event.inputs.months || '12' }}"
 
       - name: 產生頁面
+        # QUOTE_API 未設定時頁面就不顯示報價欄，行為與沒有這功能時相同。
+        # 部署好 Worker 後，到 Settings → Secrets and variables → Actions → Variables
+        # 新增 QUOTE_API，值為 Worker 網址。
+        env:
+          QUOTE_API: ${{ vars.QUOTE_API }}
         run: |
           python build_page.py
           mkdir -p _site

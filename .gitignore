@@ -4,6 +4,9 @@ disposal_data.json.tmp
 disposal.html
 _site/
 
+worker/node_modules/
+worker/.wrangler/
+
 __pycache__/
 *.py[cod]
 .venv/

@@ -1,0 +1,7 @@
+name = "taiwan-disposal-quotes"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# 只允許自己的站台呼叫。要在本機測就把 http://localhost:8000 一起列進來。
+[vars]
+ALLOWED_ORIGINS = "https://bamboo-trade-bot.github.io"

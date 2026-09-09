@@ -13,6 +13,7 @@ import os
 
 TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "page_template.html")
 PLACEHOLDER = "/*__DATA__*/"
+QUOTE_PLACEHOLDER = "/*__QUOTE_API__*/"
 
 # 頁面實際用到的欄位；其餘（原始欄位、收盤價、本益比）不進頁面以縮小檔案
 KEEP = ["market", "announce_date", "code", "name", "type", "reason", "round",
@@ -35,6 +36,7 @@ def slim(payload):
         "generated_at": payload["generated_at"],
         "today": payload["today"],
         "calendar_ok": payload.get("calendar_ok", False),
+        "is_trading_day": payload.get("is_trading_day", False),
         "range": payload["range"],
         "rows": rows,
     }
@@ -48,13 +50,20 @@ def read_template(path=TEMPLATE):
     return html
 
 
-def render(payload, template=None):
-    """回傳內嵌好資料的完整 HTML 字串。"""
+def render(payload, template=None, quote_api=None):
+    """回傳內嵌好資料的完整 HTML 字串。
+
+    quote_api 是報價端點位址。留空則頁面完全不顯示報價欄，行為與加這個功能前
+    一模一樣——靜態站在 Worker 部署好之前照樣可用。
+    """
     html = template if template is not None else read_template()
     blob = json.dumps(slim(payload), ensure_ascii=False, separators=(",", ":"))
     # 內嵌在 <script> 裡，避免字串內出現 </script> 提前關閉標籤
     blob = blob.replace("</", "<\\/")
-    return html.replace(PLACEHOLDER, blob)
+    if quote_api is None:
+        quote_api = os.environ.get("QUOTE_API", "")
+    api = json.dumps((quote_api or "").strip())
+    return html.replace(PLACEHOLDER, blob).replace(QUOTE_PLACEHOLDER, api)
 
 
 def main():

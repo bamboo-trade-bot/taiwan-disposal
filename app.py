@@ -21,10 +21,12 @@ import json
 import os
 import threading
 import traceback
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import build_page
 import fetch_disposal
+import quotes
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(HERE, "disposal_data.json")
@@ -76,7 +78,8 @@ class Cache(object):
             log("could not load cached data: %s" % e)
 
     def _store(self, payload, when):
-        html = build_page.render(payload).encode("utf-8")
+        # 本機跑的時候，報價就用自己這台的端點
+        html = build_page.render(payload, quote_api="/api/quotes").encode("utf-8")
         with self.lock:
             self.payload = payload
             self.html = html
@@ -146,6 +149,10 @@ def log(msg):
     print("[%s] %s" % (dt.datetime.now().strftime("%H:%M:%S"), msg), flush=True)
 
 
+# 報價與處置公告的更新節奏差很多，各自一份快取
+QUOTES = quotes.Cache()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "DisposalWatch"
     protocol_version = "HTTP/1.1"
@@ -155,20 +162,23 @@ class Handler(BaseHTTPRequestHandler):
         log("%s %s" % (self.address_string(), fmt % args))
 
     # ---- 回應工具 ----
-    def _send(self, code, body, ctype):
+    def _send(self, code, body, ctype, cors=False):
         if isinstance(body, str):
             body = body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if cors:
+            # 讓別的來源（例如靜態站）也能把這台當報價後端
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def _json(self, code, obj):
+    def _json(self, code, obj, cors=False):
         self._send(code, json.dumps(obj, ensure_ascii=False, indent=1),
-                   "application/json; charset=utf-8")
+                   "application/json; charset=utf-8", cors=cors)
 
     # ---- 路由 ----
     def do_GET(self):
@@ -194,6 +204,31 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(503, {"error": "資料尚未就緒", "status": c.status()})
                 return
             self._json(200, payload)
+            return
+
+        if path == "/api/quotes":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            raw = (qs.get("codes") or [""])[0]
+            keys = [k for k in (x.strip() for x in raw.split(",")) if quotes.valid_key(k)]
+            if not keys:
+                self._json(400, {"error": "codes 參數缺少有效代號，格式如 tse_3406,otc_3629"},
+                           cors=True)
+                return
+            if len(keys) > 100:
+                self._json(400, {"error": "一次最多 100 個代號"}, cors=True)
+                return
+            try:
+                data, cached = QUOTES.get(keys)
+            except Exception as e:
+                self._json(502, {"error": "報價來源暫時無法取得",
+                                 "detail": str(e)[:200]}, cors=True)
+                return
+            self._json(200, {
+                "source": "twse-mis",
+                "cached": cached,
+                "fetched_at": fetch_disposal.taipei_now().isoformat(timespec="seconds"),
+                "quotes": data,
+            }, cors=True)
             return
 
         if path == "/api/status":

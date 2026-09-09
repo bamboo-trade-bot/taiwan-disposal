@@ -1,4 +1,5 @@
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>台股處置股觀測</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,6 +21,8 @@
   --s2:       #eb6834;
   --s3:       #1baf7a;
   --good:     #1c7c4f;
+  --up:       #cf3030;
+  --down:     #16794f;
   --focus:    #2a78d6;
   --shadow:   0 1px 2px rgba(21,24,29,.06), 0 8px 24px rgba(21,24,29,.05);
 
@@ -44,6 +47,8 @@
     --s2:       #d95926;
     --s3:       #199e70;
     --good:     #46b183;
+    --up:       #f07070;
+    --down:     #3fae7a;
     --focus:    #3987e5;
     --shadow:   0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
   }
@@ -64,6 +69,8 @@
   --s2:       #d95926;
   --s3:       #199e70;
   --good:     #46b183;
+  --up:       #f07070;
+  --down:     #3fae7a;
   --focus:    #3987e5;
   --shadow:   0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
 }
@@ -172,6 +179,23 @@ td.dt { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); whit
 .rel.freed .lab { color: var(--good); font-weight: 600; }
 .stat.is-freed .v { color: var(--good); }
 
+/* 報價。台股慣例紅漲綠跌，與美股相反 */
+.q { display: flex; flex-direction: column; gap: 2px; min-width: 104px; }
+.q .qp { font-family: var(--f-mono); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.q .qc { font-family: var(--f-mono); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.q .qc.up { color: var(--up); }
+.q .qc.down { color: var(--down); }
+.q .qc.flat { color: var(--ink-3); }
+.q .qb {
+  align-self: flex-start; margin-top: 1px; padding: 0 5px; border-radius: 2px;
+  font-family: var(--f-mono); font-size: 10px; font-weight: 600; line-height: 1.7;
+}
+.q .qb.up { background: var(--up); color: var(--panel); }
+.q .qb.down { background: var(--down); color: var(--panel); }
+.q .qnone { font-family: var(--f-mono); font-size: 12px; color: var(--ink-3); }
+.qstamp { font-family: var(--f-mono); font-size: 12px; color: var(--ink-3); margin-left: auto; }
+.qstamp.err { color: var(--up); }
+
 /* ---------- chart ---------- */
 .card { border: 1px solid var(--rule); border-radius: 4px; background: var(--panel); padding: 18px 20px 14px; }
 .card h3 { font-family: var(--f-body); font-size: 14px; font-weight: 700; }
@@ -245,12 +269,14 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
       <h2 style="font-size:17px">今日出關、處置中與即將開始的標的</h2>
       <p>依解除日排序，今日出關的排在最前。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。<span id="live-note"></span></p>
       <label class="toggle"><input type="checkbox" id="show-derivs"> 一併顯示權證與可轉債</label>
+      <span class="qstamp" id="qstamp" hidden></span>
     </div>
     <div class="tablewrap">
       <table id="live-table">
         <thead>
           <tr>
             <th>市場</th><th>代號</th><th>名稱</th><th>類型</th>
+            <th class="q-col" hidden>報價</th>
             <th>處置原因</th><th>層級</th><th class="num">撮合</th><th>預收款券</th>
             <th>處置期間</th><th>解除</th>
           </tr>
@@ -312,7 +338,11 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
   </footer>
 </div>
 
-<script>window.DISPOSAL_DATA = /*__DATA__*/;</script>
+<script>
+window.DISPOSAL_DATA = /*__DATA__*/;
+// 報價端點。留空則完全不顯示報價欄，頁面行為與沒有這功能時相同。
+window.QUOTE_API = /*__QUOTE_API__*/;
+</script>
 <script>
 (function () {
   "use strict";
@@ -463,6 +493,106 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
     }
     return td;
   }
+  // ---------- 報價（漸進增強：沒設端點就整欄不存在） ----------
+  var QUOTE_URL = String(window.QUOTE_API || "").trim();
+  var QUOTE_ON = !!QUOTE_URL;
+  var quotesStarted = false;
+
+  function quoteKey(r) { return (r.market === "上櫃" ? "otc_" : "tse_") + r.code; }
+
+  function quoteCell(r) {
+    var td = el("td", "q-col");
+    td.hidden = !QUOTE_ON;
+    td.setAttribute("data-qkey", quoteKey(r));
+    td.appendChild(el("div", "q"));
+    return td;
+  }
+
+  var lastPrice = {};        // 撮合空檔時沿用上一次看到的價，避免畫面一直閃成空白
+
+  function paintQuote(td, q) {
+    var box = td.firstChild;
+    var key = td.getAttribute("data-qkey");
+    box.innerHTML = "";
+    if (!q) { box.appendChild(el("span", "qnone", "—")); return; }
+
+    var shown = null, note = null;
+    if (q.price != null) {
+      shown = q.price;
+      lastPrice[key] = q.price;
+    } else if (lastPrice[key] != null) {
+      shown = lastPrice[key];
+    } else if (q.traded && q.bid != null) {
+      shown = q.bid; note = "買價";       // 漲停鎖死時沒有成交價，但買方掛在漲停
+    } else if (q.traded && q.ask != null) {
+      shown = q.ask; note = "賣價";
+    }
+    // 今天完全沒成交的，不能拿掛單價當價格顯示，否則會被讀成成交價
+
+    if (shown == null) {
+      box.appendChild(el("span", "qnone", q.traded ? "—" : "尚無成交"));
+    } else {
+      box.appendChild(el("span", "qp", shown.toFixed(2)));
+      var pct = q.prev_close
+        ? Math.round(10000 * (shown - q.prev_close) / q.prev_close) / 100 : null;
+      var dir = pct == null ? "flat" : (pct > 0 ? "up" : (pct < 0 ? "down" : "flat"));
+      box.appendChild(el("span", "qc " + dir,
+        (pct == null ? "—" : (pct > 0 ? "+" : "") + pct.toFixed(2) + "%")
+        + (note ? " " + note : "")));
+    }
+
+    if (q.limit) {
+      // 鎖死＝停在漲跌停且對手方沒有掛單，也就是實際上買不到或賣不掉
+      box.appendChild(el("span", "qb " + q.limit,
+        (q.limit === "up" ? "漲停" : "跌停") + (q.locked ? "鎖死" : "")));
+    }
+  }
+
+  function inSession() {
+    if (!D.is_trading_day) return false;
+    var d = new Date(Date.now() + 8 * 3600 * 1000);   // 台北牆上時間，與瀏覽器時區無關
+    var mins = d.getUTCHours() * 60 + d.getUTCMinutes();
+    return mins >= 9 * 60 && mins <= 13 * 60 + 35;
+  }
+
+  function pollQuotes() {
+    var cells = [].slice.call(document.querySelectorAll("#live-table td.q-col"));
+    if (!cells.length) return;
+    var keys = cells.map(function (td) { return td.getAttribute("data-qkey"); })
+      .filter(function (v, i, a) { return v && a.indexOf(v) === i; });
+    var url = QUOTE_URL + (QUOTE_URL.indexOf("?") < 0 ? "?" : "&")
+      + "codes=" + encodeURIComponent(keys.join(","));
+    fetch(url)
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (j) {
+        var q = j.quotes || {};
+        cells.forEach(function (td) { paintQuote(td, q[td.getAttribute("data-qkey")]); });
+        var first = Object.keys(q)[0];
+        var stamp = $("qstamp");
+        stamp.className = "qstamp";
+        stamp.textContent = "報價 " + ((first && q[first].time) || "—")
+          + "　來源 證交所 MIS" + (inSession() ? "" : "（非交易時段，顯示最後成交）");
+      })
+      .catch(function (e) {
+        var stamp = $("qstamp");
+        stamp.className = "qstamp err";
+        stamp.textContent = "報價暫時取不到：" + e.message;
+      });
+  }
+
+  function startQuotes() {
+    if (!QUOTE_ON) return;
+    [].slice.call(document.querySelectorAll(".q-col")).forEach(function (n) { n.hidden = false; });
+    $("qstamp").hidden = false;
+    quotesStarted = true;
+    pollQuotes();                       // 非盤中也抓一次，讓欄位顯示最後成交
+    // 處置股每 2 分鐘才撮合一次，15 秒已遠比實際變動快
+    setInterval(function () { if (inSession()) pollQuotes(); }, 15000);
+  }
+
   function payCell(r) {
     var td = el("td");
     if (!r.prepay) { td.appendChild(document.createTextNode("—")); return td; }
@@ -485,7 +615,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
     if (!list.length) {
       var tr0 = el("tr");
       var td0 = el("td", "", "資料截止日沒有處置中的標的。");
-      td0.colSpan = 10; td0.style.color = "var(--ink-2)"; td0.style.padding = "22px";
+      td0.colSpan = 11; td0.style.color = "var(--ink-2)"; td0.style.padding = "22px";
       tr0.appendChild(td0); lbody.appendChild(tr0);
       return;
     }
@@ -496,6 +626,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
       tr.appendChild(el("td", "code", r.code));
       tr.appendChild(nameCell(r));
       tr.appendChild(el("td", "", r.type));
+      tr.appendChild(quoteCell(r));
       tr.appendChild(el("td", "", r.reason));
       var tdR = el("td"); tdR.appendChild(roundPill(r)); tr.appendChild(tdR);
       tr.appendChild(el("td", "num", intervalText(r)));
@@ -539,8 +670,12 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
       lbody.appendChild(tr);
     });
   }
-  $("show-derivs").addEventListener("change", renderLive);
+  $("show-derivs").addEventListener("change", function () {
+    renderLive();
+    if (quotesStarted) pollQuotes();     // 切換後新出現的列也要有報價
+  });
   renderLive();
+  startQuotes();
 
   $("all-note").textContent = "　統計區間內共 " + rows.length + " 件公告，上市 "
     + listed + " ： 上櫃 " + otc + "；同一檔多次被處置分別計次。";

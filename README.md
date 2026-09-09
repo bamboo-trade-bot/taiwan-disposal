@@ -87,6 +87,7 @@ python app.py
 | GET | `/api/disposal` | 完整資料 JSON |
 | GET | `/api/status` | 快取狀態：資料時間、是否更新中、上次錯誤 |
 | POST | `/api/refresh` | 立刻在背景重抓一次 |
+| GET | `/api/quotes?codes=tse_3406,otc_3629` | 即時報價，5 秒快取 |
 
 資料在伺服器端快取並落地成 `disposal_data.json`，重啟後可立即服務。快取過期時採
 stale-while-revalidate：**先把手上的資料送出去，同時在背景抓新的**，所以請求不會卡在
@@ -105,6 +106,47 @@ python fetch_disposal.py && python build_page.py
 
 ---
 
+## 即時報價（選用）
+
+頁面可以顯示現況清單的即時報價。**沒設定報價端點時整欄不存在**，行為與沒有這功能時
+完全相同，所以靜態站在 Worker 部署好之前照常可用。
+
+### 本機
+
+`python app.py` 會自動把報價指向自己的 `/api/quotes`，不必額外設定。
+
+### 公開站：部署 Cloudflare Worker
+
+證交所 MIS 不送 CORS 標頭、GitHub Pages 又是 HTTPS 打不到 http 的自架服務，所以中間
+需要一層 proxy。`worker/` 就是這層，免費額度綽綽有餘且自帶 HTTPS。
+
+```bash
+cd worker
+npx wrangler deploy
+```
+
+部署後把網址（形如 `https://taiwan-disposal-quotes.<你的帳號>.workers.dev`）填到
+repo 的 **Settings → Secrets and variables → Actions → Variables**，變數名 `QUOTE_API`。
+下次建置時頁面就會帶報價欄。
+
+`worker/wrangler.toml` 的 `ALLOWED_ORIGINS` 控制哪些來源可以呼叫，預設只允許本站。
+
+### 為什麼輪詢 15 秒就夠
+
+處置股是人工撮合，目前每 2 分鐘才成交一次，價格本來就不會更快變動。Worker 端另有
+5 秒快取，讓上游只看到極少量請求。
+
+### 幾個容易誤判的地方
+
+| 情況 | 處理 |
+|---|---|
+| 撮合空檔 `z` 為 `-` | 退回前一盤成交價 `pz`；再不行就沿用前端記住的上一個價 |
+| 漲停鎖死 | `z` 與 `pz` 會同時為空，改由「買方掛在漲停且賣方無掛單」判定，仍標示得出來 |
+| 五檔字串含 `0.0000` 佔位 | 要濾掉，否則會誤判成對手方還有掛單 |
+| 今天完全沒成交 | 不可拿掛單價當價格顯示，會被讀成成交價；顯示「尚無成交」 |
+
+`quotes.py` 與 `worker/src/index.js` 的正規化邏輯保持一致，前端接哪一邊都一樣。
+
 ## 為什麼資料不能在瀏覽器端抓
 
 兩個來源都沒有回傳 `Access-Control-Allow-Origin`，前端 `fetch` 會被 CORS 擋掉。
@@ -116,6 +158,8 @@ python fetch_disposal.py && python build_page.py
 |---|---|
 | `.github/workflows/deploy.yml` | 排程抓取、建置並發佈到 GitHub Pages |
 | `app.py` | HTTP 伺服器：頁面、JSON API、快取與背景更新 |
+| `quotes.py` | 證交所 MIS 即時報價，供 `app.py` 的 `/api/quotes` 使用 |
+| `worker/` | Cloudflare Worker 版的報價 proxy，給公開站用 |
 | `fetch_disposal.py` | 抓取兩個來源、正規化欄位，輸出 `disposal_data.json` |
 | `build_page.py` | 把資料內嵌進 `page_template.html`；`app.py` 也是呼叫這裡的 `render()` |
 | `page_template.html` | 頁面版型與前端邏輯，資料位置為 `/*__DATA__*/` |
