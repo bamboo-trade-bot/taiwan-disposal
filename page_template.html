@@ -125,7 +125,7 @@ section { margin-top: 44px; }
 .tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--panel); }
 table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
 /* 欄位多，視窗變窄時讓容器橫向捲動，不要把儲存格擠成好幾行高 */
-#live-table { min-width: 1120px; }
+#live-table { min-width: 1000px; }
 #all-table { min-width: 1040px; }
 thead th {
   position: sticky; top: 0; background: var(--panel-2); text-align: left;
@@ -284,7 +284,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
             <th>市場</th><th>代號</th><th>名稱</th><th>類型</th>
             <th class="q-col" hidden>報價</th>
             <th id="dd-th">回落</th>
-            <th>處置原因</th><th>層級</th><th class="num">撮合</th><th>預收款券</th>
+            <th>層級</th><th class="num">撮合</th><th>預收款券</th>
             <th>處置期間</th><th>解除</th>
           </tr>
         </thead>
@@ -681,7 +681,7 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     if (!list.length) {
       var tr0 = el("tr");
       var td0 = el("td", "", "資料截止日沒有處置中的標的。");
-      td0.colSpan = 12; td0.style.color = "var(--ink-2)"; td0.style.padding = "22px";
+      td0.colSpan = 11; td0.style.color = "var(--ink-2)"; td0.style.padding = "22px";
       tr0.appendChild(td0); lbody.appendChild(tr0);
       return;
     }
@@ -694,7 +694,6 @@ window.QUOTE_API = /*__QUOTE_API__*/;
       tr.appendChild(el("td", "", r.type));
       tr.appendChild(quoteCell(r));
       tr.appendChild(drawdownCell(r));
-      tr.appendChild(el("td", "", r.reason));
       var tdR = el("td"); tdR.appendChild(roundPill(r)); tr.appendChild(tdR);
       tr.appendChild(el("td", "num", intervalText(r)));
       tr.appendChild(payCell(r));
