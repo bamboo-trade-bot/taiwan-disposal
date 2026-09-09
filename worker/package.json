@@ -1,0 +1,14 @@
+{
+  "name": "taiwan-disposal-quotes",
+  "version": "1.0.0",
+  "description": "處置股報價 proxy（Cloudflare Worker）。補上 MIS 缺少的 CORS 標頭並提供 HTTPS。",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787 --local",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.130.0"
+  }
+}
