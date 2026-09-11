@@ -106,6 +106,10 @@ a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible
   margin-top: 16px; font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2);
 }
 .stamp b { color: var(--ink); font-weight: 600; }
+.stamp .stale {
+  color: var(--accent); font-weight: 600;
+  border: 1px solid var(--accent); border-radius: 3px; padding: 1px 8px;
+}
 
 /* ---------- sections ---------- */
 section { margin-top: 44px; }
@@ -260,10 +264,10 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
     <p class="eyebrow">TWSE &amp; TPEx · 公布處置有價證券</p>
     <h1>台股處置股觀測</h1>
     <p class="sub">彙整證交所（上市）與櫃買中心（上櫃）兩邊分開發布的處置公告，統一成一張表：現在誰在處置中、撮合多久一次、要不要預收款券、哪天出關。</p>
-    <div class="stamp">
-      <span>資料截止 <b id="s-today"></b></span>
+    <div class="stamp" id="stamp-row">
+      <span>今日 <b id="s-today"></b></span>
       <span>統計區間 <b id="s-range"></b></span>
-      <span>抓取時間 <b id="s-gen"></b>（台北時間）</span>
+      <span>公告抓取於 <b id="s-gen"></b>（台北時間）</span>
       <span><a href="https://www.twse.com.tw/zh/announcement/punish.html" target="_blank" rel="noopener">證交所公告</a></span>
       <span><a href="https://www.tpex.org.tw/zh-tw/announce/market/disposal.html" target="_blank" rel="noopener">櫃買中心公告</a></span>
     </div>
@@ -272,7 +276,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
   <section id="now">
     <div class="sec-head">
       <h2>現在的處置狀態</h2>
-      <p>以資料截止日判定；「即將開始」為已公告但處置期間尚未起算。</p>
+      <p>以你開啟頁面當下的台北日期判定；「即將開始」為已公告但處置期間尚未起算。</p>
     </div>
     <div class="stats" id="stats"></div>
 
@@ -360,7 +364,30 @@ window.QUOTE_API = /*__QUOTE_API__*/;
   "use strict";
   var D = window.DISPOSAL_DATA;
   var rows = D.rows;
-  var TODAY = D.today;
+
+  // 「今天」以瀏覽器當下的台北日期為準，不用建置當下的日期。
+  // GitHub 的排程常被延後數小時，若沿用建置日期，早上打開會整頁停在昨天；
+  // 而昨晚抓的公告其實已經含有今天的名單，只是被判定成昨天的狀態。
+  function taipeiToday() {
+    var d = new Date(Date.now() + 8 * 3600 * 1000);
+    return d.getUTCFullYear() + "-"
+      + String(d.getUTCMonth() + 1).padStart(2, "0") + "-"
+      + String(d.getUTCDate()).padStart(2, "0");
+  }
+  var TODAY = taipeiToday();
+
+  var HOLIDAYS = {};
+  (D.holidays || []).forEach(function (h) { HOLIDAYS[h] = 1; });
+  function isTradingDay(iso) {
+    var wd = new Date(iso + "T00:00:00Z").getUTCDay();
+    return wd >= 1 && wd <= 5 && !HOLIDAYS[iso];
+  }
+
+  // 處置狀態一律由起訖日與出關日現算，不用抓取時寫死的布林值
+  function isActive(r) {
+    return !!(r.start && r.end && r.start <= TODAY && TODAY <= r.end);
+  }
+  function isUpcoming(r) { return !!(r.start && r.start > TODAY); }
 
   // ---------- helpers ----------
   function $(id) { return document.getElementById(id); }
@@ -379,8 +406,8 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     return Math.round((Date.parse(b + "T00:00:00") - Date.parse(a + "T00:00:00")) / 86400000);
   }
   function state(r) {
-    if (r.active) return "live";
-    if (r.upcoming) return "soon";
+    if (isActive(r)) return "live";
+    if (isUpcoming(r)) return "soon";
     // 該股身上若還有另一張處置，這張雖已期滿也不算出關（busy 在下方 stat strip 建立）
     if (r.release === TODAY && !busy[r.market + "|" + r.code]) return "freed";
     return "done";
@@ -427,6 +454,17 @@ window.QUOTE_API = /*__QUOTE_API__*/;
   $("s-range").textContent = roc(D.range.start) + " – " + roc(D.range.end);
   $("s-gen").textContent = D.generated_at.replace("T", " ");
 
+  // 公告是收盤後陸續發布的。若這份資料抓得太久以前，今天新增的處置可能還沒進來，
+  // 與其讓人以為看到的是完整名單，不如明講。
+  (function () {
+    var ageH = (Date.now() + 8 * 3600 * 1000
+      - Date.parse(D.generated_at + "Z")) / 3600000;
+    if (ageH < 18) return;
+    var warn = el("span", "stale",
+      "公告資料已 " + Math.round(ageH) + " 小時未更新，今日新增的處置可能尚未納入");
+    $("stamp-row").appendChild(warn);
+  })();
+
   // ---------- 合併重疊公告 ----------
   // 同一檔可能同時被多張處置公告拘束（前一次還沒結束又接了一次）。實際受限的是其中
   // 最嚴格的條件，所以「現在」一律以證券為單位合併，而不是以公告為單位計數。
@@ -457,15 +495,15 @@ window.QUOTE_API = /*__QUOTE_API__*/;
   }
 
   // ---------- stat strip ----------
-  var live = mergeOrders(rows.filter(function (r) { return r.active; }));
-  var soon = mergeOrders(rows.filter(function (r) { return r.upcoming; }));
+  var live = mergeOrders(rows.filter(isActive));
+  var soon = mergeOrders(rows.filter(isUpcoming));
 
   // 今日出關＝處置期滿，今天是第一個可正常交易的日子。
   // 必須排除身上還有另一張處置的個股，否則會一邊出關一邊還在處置。
   var busy = {};
   live.concat(soon).forEach(function (r) { busy[r.market + "|" + r.code] = 1; });
   var freed = mergeOrders(rows.filter(function (r) {
-    return !r.active && !r.upcoming && r.release === TODAY;
+    return !isActive(r) && !isUpcoming(r) && r.release === TODAY;
   })).filter(function (r) { return !busy[r.market + "|" + r.code]; });
   freed.forEach(function (r) { r.freed = true; });
 
@@ -613,7 +651,7 @@ window.QUOTE_API = /*__QUOTE_API__*/;
   }
 
   function inSession() {
-    if (!D.is_trading_day) return false;
+    if (!isTradingDay(TODAY)) return false;
     var d = new Date(Date.now() + 8 * 3600 * 1000);   // 台北牆上時間，與瀏覽器時區無關
     var mins = d.getUTCHours() * 60 + d.getUTCMinutes();
     return mins >= 9 * 60 && mins <= 13 * 60 + 35;
@@ -682,7 +720,7 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     lbody.innerHTML = "";
     if (!list.length) {
       var tr0 = el("tr");
-      var td0 = el("td", "", "資料截止日沒有處置中的標的。");
+      var td0 = el("td", "", "今日沒有處置中的標的。");
       td0.colSpan = 11; td0.style.color = "var(--ink-2)"; td0.style.padding = "22px";
       tr0.appendChild(td0); lbody.appendChild(tr0);
       return;
@@ -708,7 +746,7 @@ window.QUOTE_API = /*__QUOTE_API__*/;
         box.className = "rel freed";
         box.appendChild(el("span", "lab", "今日出關"));
         box.appendChild(el("span", "out", roc(TODAY) + " 起正常交易"));
-      } else if (r.upcoming) {
+      } else if (isUpcoming(r)) {
         box.appendChild(el("span", "lab", dayDiff(TODAY, r.start) + " 天後開始"));
         box.appendChild(el("span", "out", roc(r.start) + " 起算"));
       } else {

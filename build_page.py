@@ -37,7 +37,7 @@ def slim(payload):
         "generated_at": payload["generated_at"],
         "today": payload["today"],
         "calendar_ok": payload.get("calendar_ok", False),
-        "is_trading_day": payload.get("is_trading_day", False),
+        "holidays": payload.get("holidays", []),
         "range": payload["range"],
         "rows": rows,
     }

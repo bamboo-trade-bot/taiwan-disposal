@@ -529,8 +529,9 @@ def collect(start, end, today=None, log=None):
         "generated_at": taipei_now().isoformat(timespec="seconds"),
         "today": today.isoformat(),
         "calendar_ok": calendar_ok,
-        # 前端據此決定盤中要不要輪詢報價
-        "is_trading_day": today.weekday() < 5 and today.isoformat() not in holidays,
+        # 休市日清單給前端：頁面以瀏覽器當下的台北日期判定處置狀態，
+        # 不沿用建置當下的日期，否則排程一延遲就整頁停在昨天。
+        "holidays": sorted(holidays),
         "range": {"start": start.isoformat(), "end": end.isoformat()},
         "sources": {
             "listed": "https://www.twse.com.tw/zh/announcement/punish.html",
