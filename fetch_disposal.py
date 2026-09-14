@@ -20,9 +20,11 @@
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.request
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -69,17 +71,23 @@ def get_json(url, referer=None, retries=4):
     last = None
     for i in range(retries):
         _throttle()
+        body = b""
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=45) as r:
-                return json.loads(r.read().decode("utf-8"))
+                body = r.read()
+                return json.loads(body.decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            # 被擋時多半是 403/429，狀態碼本身就是最關鍵的線索
+            last = "HTTP %s %s" % (e.code, e.reason)
         except Exception as e:
-            last = e
-            if i < retries - 1:
-                time.sleep(min(25, 2 ** (i + 1)))     # 2、4、8 秒
-    # 訊息帶出網址與例外型別，CI 日誌才看得出是哪一支 API、哪一種失敗
-    raise RuntimeError("fetch failed after %d tries: %s (%s: %s)"
-                       % (retries, url, type(last).__name__, last))
+            # 回應不是 JSON 時（例如擋頁、驗證頁），把開頭帶出來才知道拿到什麼
+            snippet = body[:120].decode("utf-8", "replace").replace("\n", " ") if body else ""
+            last = "%s: %s%s" % (type(e).__name__, e, (" | body: " + snippet) if snippet else "")
+        if i < retries - 1:
+            time.sleep(min(25, 2 ** (i + 1)))     # 2、4、8 秒
+    # 訊息帶出網址與失敗型態，CI 上才看得出是哪一支 API、哪一種失敗
+    raise RuntimeError("fetch failed after %d tries: %s (%s)" % (retries, url, last))
 
 
 # ---------- 共用工具 ----------
@@ -557,7 +565,15 @@ def main():
     args = p.parse_args()
 
     start, end = resolve_range(args.months, args.start, args.end)
-    payload = collect(start, end, log=lambda m: sys.stderr.write(m + "\n"))
+    try:
+        payload = collect(start, end, log=lambda m: sys.stderr.write(m + "\n"))
+    except Exception as e:
+        # GitHub Actions 的日誌要授權才讀得到，但錯誤註解在公開 repo 免授權可讀。
+        # 把失敗原因輸出成註解，排程失敗時才查得出是什麼。
+        if os.environ.get("GITHUB_ACTIONS"):
+            msg = ("%s: %s" % (type(e).__name__, e)).replace("\n", " ")
+            print("::error title=抓取處置公告失敗::%s" % msg[:900], flush=True)
+        raise
 
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=1)
