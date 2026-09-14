@@ -4,10 +4,13 @@
 資料來源
   上市：https://www.twse.com.tw/zh/announcement/punish.html
         API  https://www.twse.com.tw/rwd/zh/announcement/punish?startDate=&endDate=&response=json
-        （以「公布日期」查詢；長區間會被去重成每檔一列，故以月為單位分段抓取）
   上櫃：https://www.tpex.org.tw/zh-tw/announce/market/disposal.html
         API  https://www.tpex.org.tw/www/zh-tw/bulletin/disposal?startDate=&endDate=&response=json
-        （以「處置期間」查詢；跨月處置會在相鄰兩個月都出現，故抓完後去重）
+
+  兩邊的日期參數篩的都是「處置期間」，不是公布日期，因此：
+  - 結束日要往後多查，否則已公告但尚未起算的處置會被漏掉
+  - 跨月的處置會在相鄰兩個月都出現，抓完要去重
+  上市另有一個特性：長區間查詢會被去重成每檔一列，所以一律以月為單位分段抓。
 
 用法
   python fetch_disposal.py                # 近 12 個月
@@ -505,10 +508,14 @@ def collect(start, end, today=None, log=None):
     log = log or (lambda msg: None)
 
     log("range %s ~ %s" % (start, end))
-    twse = fetch_twse(start, end)
+    # 兩個市場的日期參數篩的都是「處置期間」，不是公布日期（已實測）。
+    # 所以結束日一定要往後多查，否則「已公告、但隔天以後才起算」的處置會被整個
+    # 排除——而這是常態：例如 3055 於週五 09/11 公告、週一 09/14 起算，只查到
+    # 09/11 就抓不到，整個週末都看不到。
+    ahead = end + dt.timedelta(days=30)
+    twse = fetch_twse(start, ahead)
     log("TWSE %d rows" % len(twse))
-    # 上櫃以「處置期間」查詢，故往後多查一個月，才涵蓋已公告但尚未開始的處置
-    tpex = fetch_tpex(start, end + dt.timedelta(days=30))
+    tpex = fetch_tpex(start, ahead)
     log("TPEx %d rows" % len(tpex))
 
     # 出關日要跳過國定假日，涵蓋今年與明年（明年的行事曆通常年底才公布）
