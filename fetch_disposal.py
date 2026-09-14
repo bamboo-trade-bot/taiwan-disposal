@@ -22,6 +22,7 @@ import datetime as dt
 import json
 import os
 import re
+import ssl
 import sys
 import time
 import urllib.error
@@ -51,6 +52,30 @@ HOLIDAY_URL = ("https://www.twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule"
 TAIFEX_URL = "https://www.taifex.com.tw/cht/2/stockLists"
 
 
+def _ssl_context():
+    """系統根憑證，再補上櫃買中心漏送的中繼憑證。驗證全程開啟。
+
+    櫃買 www.tpex.org.tw 在負載平衡後面，大多數節點只送出網站憑證、漏送中繼
+    憑證（實測連 5 次有 4 次只給 1 張）。Windows 會自動去下載補上所以本機正常，
+    但 GitHub 的 Ubuntu（OpenSSL）不會，於是 2026-09-12 起 CI 抓取全數失敗於
+    「unable to get local issuer certificate」。
+
+    certs/twca-intermediates.pem 是 TWCA SSL Certification Authority 及其
+    交叉簽署的 TWCA CYBER Root CA，取自證交所（它有正確送出同一張中繼憑證，
+    Key Identifier 與櫃買網站憑證的簽發者一致）。這裡只「補上」中繼憑證，
+    根憑證仍由系統信任清單決定；主機名稱與效期檢查照常進行。
+    最早的一張於 2030-12-09 到期，屆時需更新。
+    """
+    ctx = ssl.create_default_context()   # 不指定 cafile，才會保留系統根憑證
+    extra = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "certs", "twca-intermediates.pem")
+    if os.path.exists(extra):
+        ctx.load_verify_locations(cafile=extra)
+    return ctx
+
+
+SSL_CONTEXT = _ssl_context()
+
 # 一次建置會打六十幾次請求。CI 跑在境外 IP，對來源網站而言比本機更容易被
 # 限速或逾時，所以請求之間留間隔，失敗則指數退避。
 THROTTLE_SECONDS = 0.35
@@ -74,7 +99,7 @@ def get_json(url, referer=None, retries=4):
         body = b""
         try:
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=45) as r:
+            with urllib.request.urlopen(req, timeout=45, context=SSL_CONTEXT) as r:
                 body = r.read()
                 return json.loads(body.decode("utf-8"))
         except urllib.error.HTTPError as e:
@@ -389,7 +414,7 @@ def fetch_stock_futures(log):
     """
     try:
         req = urllib.request.Request(TAIFEX_URL, headers=UA)
-        with urllib.request.urlopen(req, timeout=45) as r:
+        with urllib.request.urlopen(req, timeout=45, context=SSL_CONTEXT) as r:
             html = r.read().decode("utf-8", "replace")
     except Exception as e:
         log("stock futures list unavailable: %s" % e)

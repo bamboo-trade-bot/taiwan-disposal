@@ -208,7 +208,8 @@ repo 的 **Settings → Secrets and variables → Actions → Variables**，變�
 | `.github/workflows/deploy.yml` | 排程抓取、建置並發佈到 GitHub Pages |
 | `app.py` | HTTP 伺服器：頁面、JSON API、快取與背景更新 |
 | `quotes.py` | 證交所 MIS 即時報價，供 `app.py` 的 `/api/quotes` 使用 |
-| `history.py` | 個股日線，用來算 N 個交易日內的高點 |
+| `history.py` | 個股日線，用來取進處置前一交易日的收盤價 |
+| `certs/twca-intermediates.pem` | 櫃買中心漏送的 TWCA 中繼憑證，2030-12 到期 |
 | `worker/` | Cloudflare Worker 版的報價 proxy，給公開站用 |
 | `fetch_disposal.py` | 抓取兩個來源、正規化欄位，輸出 `disposal_data.json` |
 | `build_page.py` | 把資料內嵌進 `page_template.html`；`app.py` 也是呼叫這裡的 `render()` |
@@ -224,6 +225,24 @@ repo 的 **Settings → Secrets and variables → Actions → Variables**，變�
 | 上櫃 | <https://www.tpex.org.tw/zh-tw/announce/market/disposal.html> | `tpex.org.tw/www/zh-tw/bulletin/disposal?startDate=&endDate=&response=json` |
 | 休市日曆 | 證交所市場開休市日期 | `twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule?response=json&queryYear=<民國年>` |
 | 股期標的 | <https://www.taifex.com.tw/cht/2/stockLists> | 同一網址，HTML 表格解析 |
+
+### 櫃買中心的 TLS 憑證鏈不完整
+
+`www.tpex.org.tw` 在負載平衡後面，**大多數節點漏送中繼憑證**（實測連 5 次有 4 次只給網站
+憑證 1 張）。Windows 會自動下載補上所以本機正常，但 GitHub 的 Ubuntu（OpenSSL）不會，
+結果是 2026-09-12 起 CI 抓取全數失敗於 `unable to get local issuer certificate`——
+而本機怎麼跑都重現不出來。
+
+修法是 `certs/twca-intermediates.pem`：自行補上漏送的 **TWCA SSL Certification Authority**
+及其交叉簽署的 **TWCA CYBER Root CA**。這兩張取自證交所（它正確送出同一張中繼憑證，Key
+Identifier 與櫃買網站憑證的簽發者一致）。
+
+- **驗證沒有關掉**：只補中繼憑證，根憑證仍由系統信任清單決定；主機名稱與效期照常檢查
+  （已用 badssl 的主機名稱不符、過期憑證兩個測試站確認都會被拒絕）
+- **有效期**：最早一張於 **2030-12-09** 到期，屆時需從證交所重新取出並更新這個檔案
+
+要在 Windows 上重現 CI 的行為，得指定 CA 檔讓 Python 走純 OpenSSL（不走 Windows 的自動補抓），
+否則怎麼測都會過。
 
 休市日曆有個容易踩的地方：清單裡同時列出「國曆新年開始交易日」「農曆春節前最後交易日」
 這類**照常交易**的資訊列，必須排除，否則會把交易日誤判成休市。股期清單是 HTML 解析，
