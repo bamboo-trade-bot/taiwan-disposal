@@ -162,6 +162,7 @@ td.dt { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); whit
 .pill.pay-all { background: var(--accent); border-color: var(--accent); color: var(--panel); font-weight: 600; }
 .pill.pay-cond { border-style: dotted; }
 .pill.freed { border-color: var(--good); color: var(--good); font-weight: 600; }
+.pill.pending { border-color: var(--good); border-style: dashed; color: var(--good); }
 
 /* 股期標記：處置期間現股受限，有股期就還有連續交易的工具 */
 .fut {
@@ -181,6 +182,7 @@ td.dt { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); whit
 .rel .out { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 .rel.last .lab { color: var(--accent); font-weight: 600; }
 .rel.freed .lab { color: var(--good); font-weight: 600; }
+.rel.pending .lab { color: var(--good); }
 .stat.is-freed .v { color: var(--good); }
 
 /* 報價。台股慣例紅漲綠跌，與美股相反 */
@@ -281,8 +283,8 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
     <div class="stats" id="stats"></div>
 
     <div class="sec-head" style="margin-top:26px">
-      <h2 style="font-size:17px">今日出關、處置中與即將開始的標的</h2>
-      <p>依解除日排序，今日出關的排在最前。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。<span id="live-note"></span></p>
+      <h2 style="font-size:17px">出關、處置中與即將開始的標的</h2>
+      <p>依解除日排序，已出關與待出關的排在最前。「待出關」為處置期已結束、但還沒到第一個可正常交易日（例如週五結束、週一才出關）。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。<span id="live-note"></span></p>
       <label class="toggle"><input type="checkbox" id="show-derivs"> 一併顯示權證與可轉債</label>
       <span class="qstamp" id="qstamp" hidden></span>
     </div>
@@ -328,7 +330,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
       <label>層級 <select id="f-round"><option value="">全部</option><option value="1">第一次</option><option value="2">第二次</option></select></label>
       <label>預收 <select id="f-prepay"><option value="">全部</option><option value="全面">全面</option><option value="條件">條件</option></select></label>
       <label>股期 <select id="f-fut"><option value="">全部</option><option value="1">有</option><option value="0">無</option></select></label>
-      <label>狀態 <select id="f-state"><option value="">全部</option><option value="live">處置中</option><option value="soon">即將開始</option><option value="freed">今日出關</option><option value="done">已結束</option></select></label>
+      <label>狀態 <select id="f-state"><option value="">全部</option><option value="live">處置中</option><option value="soon">即將開始</option><option value="freed">今日出關</option><option value="pending">待出關</option><option value="done">已結束</option></select></label>
       <input type="search" id="f-q" placeholder="代號或名稱" aria-label="搜尋代號或名稱">
       <span class="count" id="f-count"></span>
     </div>
@@ -374,7 +376,9 @@ window.QUOTE_API = /*__QUOTE_API__*/;
       + String(d.getUTCMonth() + 1).padStart(2, "0") + "-"
       + String(d.getUTCDate()).padStart(2, "0");
   }
-  var TODAY = taipeiToday();
+  // ?today=YYYY-MM-DD 可指定日期檢視，用來查某天的狀態或驗證週末行為
+  var forced = (location.search.match(/[?&]today=(\d{4}-\d{2}-\d{2})/) || [])[1];
+  var TODAY = forced || taipeiToday();
 
   var HOLIDAYS = {};
   (D.holidays || []).forEach(function (h) { HOLIDAYS[h] = 1; });
@@ -388,6 +392,13 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     return !!(r.start && r.end && r.start <= TODAY && TODAY <= r.end);
   }
   function isUpcoming(r) { return !!(r.start && r.start > TODAY); }
+
+  // 處置迄日之後、出關日之前的空窗。週五處置結束、週一才出關的話，整個週末
+  // 都落在這裡——不補這個狀態，該檔會從清單上整個消失，偏偏那正是會想先查
+  // 「下個交易日誰恢復交易」的時候。
+  function isPending(r) {
+    return !!(r.end && r.release && r.end < TODAY && TODAY < r.release);
+  }
 
   // ---------- helpers ----------
   function $(id) { return document.getElementById(id); }
@@ -409,10 +420,12 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     if (isActive(r)) return "live";
     if (isUpcoming(r)) return "soon";
     // 該股身上若還有另一張處置，這張雖已期滿也不算出關（busy 在下方 stat strip 建立）
-    if (r.release === TODAY && !busy[r.market + "|" + r.code]) return "freed";
+    if (busy[r.market + "|" + r.code]) return "done";
+    if (r.release === TODAY) return "freed";
+    if (isPending(r)) return "pending";
     return "done";
   }
-  var STATE_LABEL = { live: "處置中", soon: "即將開始", freed: "今日出關" };
+  var STATE_LABEL = { live: "處置中", soon: "即將開始", freed: "今日出關", pending: "待出關" };
   function intervalText(r) { return r.interval_min == null ? "—" : r.interval_min + " 分"; }
   function marketCell(m) {
     var s = el("span", m === "上櫃" ? "mk otc" : "mk");
@@ -450,7 +463,7 @@ window.QUOTE_API = /*__QUOTE_API__*/;
   }
 
   // ---------- stamps ----------
-  $("s-today").textContent = roc(TODAY) + "（" + TODAY + "）";
+  $("s-today").textContent = roc(TODAY) + "（" + TODAY + "）" + (forced ? "　指定檢視" : "");
   $("s-range").textContent = roc(D.range.start) + " – " + roc(D.range.end);
   $("s-gen").textContent = D.generated_at.replace("T", " ");
 
@@ -507,6 +520,11 @@ window.QUOTE_API = /*__QUOTE_API__*/;
   })).filter(function (r) { return !busy[r.market + "|" + r.code]; });
   freed.forEach(function (r) { r.freed = true; });
 
+  var pending = mergeOrders(rows.filter(function (r) {
+    return !isActive(r) && !isUpcoming(r) && isPending(r);
+  })).filter(function (r) { return !busy[r.market + "|" + r.code]; });
+  pending.forEach(function (r) { r.pending = true; });
+
   var liveStock = live.filter(function (r) { return r.type === "股票"; });
   var freedStock = freed.filter(function (r) { return r.type === "股票"; });
   var payAll = liveStock.filter(function (r) { return r.prepay === "全面"; }).length;
@@ -560,7 +578,9 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     var td = el("td", "q-col");
     td.hidden = !QUOTE_ON;
     td.setAttribute("data-qkey", quoteKey(r));
-    td.appendChild(el("div", "q"));
+    var box = el("div", "q");
+    box.appendChild(el("span", "qnone", "—"));   // 報價還沒回來就先佔位，不要留白
+    td.appendChild(box);
     return td;
   }
 
@@ -708,7 +728,7 @@ window.QUOTE_API = /*__QUOTE_API__*/;
   function renderLive() {
     var withDerivs = $("show-derivs").checked;
     // 依 end 排序，今日出關的（處置迄日最早）自然排在最前面
-    var list = freed.concat(live, soon)
+    var list = freed.concat(pending, live, soon)
       .filter(function (r) { return withDerivs || r.type === "股票"; })
       .sort(function (a, b) {
         return (a.end || "").localeCompare(b.end || "") || a.code.localeCompare(b.code);
@@ -746,6 +766,10 @@ window.QUOTE_API = /*__QUOTE_API__*/;
         box.className = "rel freed";
         box.appendChild(el("span", "lab", "今日出關"));
         box.appendChild(el("span", "out", roc(TODAY) + " 起正常交易"));
+      } else if (r.pending) {
+        box.className = "rel pending";
+        box.appendChild(el("span", "lab", "待出關"));
+        box.appendChild(el("span", "out", roc(r.release) + " 起正常交易"));
       } else if (isUpcoming(r)) {
         box.appendChild(el("span", "lab", dayDiff(TODAY, r.start) + " 天後開始"));
         box.appendChild(el("span", "out", roc(r.start) + " 起算"));

@@ -496,11 +496,22 @@ def attach_baseline(rows, today, log):
     import history
 
     iso = today.isoformat()
+
+    def on_board(r):
+        """頁面現況清單會顯示的標的。
+
+        含「待出關」——處置期已結束但還沒到出關日（週五結束、週一出關就是
+        這種），否則那幾天頁面上會少一欄基準價。
+        """
+        if r["active"] or r["upcoming"] or r["release"] == iso:
+            return True
+        return bool(r["end"] and r["release"] and r["end"] < iso < r["release"])
+
     starts = {}
     for r in rows:
         if r["type"] != "股票":
             continue
-        if not (r["active"] or r["upcoming"] or r["release"] == iso):
+        if not on_board(r):
             continue
         key = (r["market"], r["code"])
         if r["start"] and (key not in starts or r["start"] < starts[key]):
