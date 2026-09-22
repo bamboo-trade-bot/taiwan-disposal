@@ -284,7 +284,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
 
     <div class="sec-head" style="margin-top:26px">
       <h2 style="font-size:17px">出關、處置中與即將開始的標的</h2>
-      <p>依解除日排序，已出關與待出關的排在最前。「待出關」為處置期已結束、但還沒到第一個可正常交易日（例如週五結束、週一才出關）。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。<span id="live-note"></span></p>
+      <p>依狀態分組：<b>已出關／待出關 → 處置中（快解除的在前）→ 即將開始</b>。「待出關」為處置期已結束、但還沒到第一個可正常交易日（例如週五結束、週一才出關）。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。<span id="live-note"></span></p>
       <label class="toggle"><input type="checkbox" id="show-derivs"> 一併顯示權證與可轉債</label>
       <span class="qstamp" id="qstamp" hidden></span>
     </div>
@@ -728,10 +728,23 @@ window.QUOTE_API = /*__QUOTE_API__*/;
   function renderLive() {
     var withDerivs = $("show-derivs").checked;
     // 依 end 排序，今日出關的（處置迄日最早）自然排在最前面
+    // 先依狀態分組，組內再依日期。只依結束日排的話，即將開始的標的其結束日
+    // 會落在處置中那些標的之間，整份清單的狀態就被打散、掃不出來。
+    function rank(r) {
+      if (r.freed) return 0;
+      if (r.pending) return 1;
+      if (isUpcoming(r)) return 3;
+      return 2;                       // 處置中
+    }
     var list = freed.concat(pending, live, soon)
       .filter(function (r) { return withDerivs || r.type === "股票"; })
       .sort(function (a, b) {
-        return (a.end || "").localeCompare(b.end || "") || a.code.localeCompare(b.code);
+        var d = rank(a) - rank(b);
+        if (d) return d;
+        // 即將開始的看起算日，其餘看結束日
+        var ka = rank(a) === 3 ? (a.start || "") : (a.end || "");
+        var kb = rank(b) === 3 ? (b.start || "") : (b.end || "");
+        return ka.localeCompare(kb) || a.code.localeCompare(b.code);
       });
 
     liveByKey = {};
