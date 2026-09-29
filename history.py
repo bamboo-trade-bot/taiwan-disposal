@@ -54,17 +54,27 @@ def _month_back(year, month, n):
     return year, m
 
 
-def baseline(code, market, today, start_iso):
-    """回傳 {pre_close, pre_close_date, last_close}。
+# 成交金額換算成「億元」的除數。兩個市場的單位不同，實測反推確認：
+#   上市 成交股數（股）、成交金額（元）      -> /1e8
+#   上櫃 成交量（張＝仟股）、成交金額（仟元） -> *1000/1e8 = /1e5
+# 弄錯會差 1000 倍。
+VALUE_DIVISOR = {"上市": 1e8, "上櫃": 1e5}
+
+VALUE_DAYS = 5          # 進處置前取幾個交易日算平均成交值
+
+
+def baseline(code, market, today, start_iso, value_days=VALUE_DAYS):
+    """回傳 {pre_close, pre_close_date, last_close, pre_value, pre_value_days}。
 
     pre_close 是處置起算日「前一個交易日」的收盤價，也就是這檔進處置之前
     最後一個正常交易日的價格；頁面用它當漲跌基準。
+    pre_value 是進處置前 value_days 個交易日的成交金額平均，單位億元。
     取不到就回 None，呼叫端自行處理。
     """
     fetch = _rows_twse if market == "上市" else _rows_tpex
+    div = VALUE_DIVISOR.get(market, 1e8)
     seen = set()
-    pre = None          # (iso, close) 早於起算日、且最接近的那一天
-    last = None         # (iso, close) 整體最新的一天
+    bars = []           # (iso, close, 成交值億元)
 
     for back in range(MAX_MONTHS):
         y, m = _month_back(today.year, today.month, back)
@@ -80,16 +90,30 @@ def baseline(code, market, today, start_iso):
             if not iso or close is None or iso in seen or iso > today.isoformat():
                 continue
             seen.add(iso)
-            if last is None or iso > last[0]:
-                last = (iso, close)
-            if start_iso and iso < start_iso and (pre is None or iso > pre[0]):
-                pre = (iso, close)
-        # 已經找到起算日之前的交易日就不必再往回抓
-        if pre is not None or not start_iso:
+            amt = _f(r[2])
+            bars.append((iso, close, (amt / div) if amt is not None else None))
+        if not start_iso:
             break
+        # 平均成交值要湊滿 value_days 根，可能得往回多抓一個月
+        if sum(1 for b in bars if b[0] < start_iso) >= value_days:
+            break
+
+    if not bars:
+        return {"pre_close": None, "pre_close_date": None, "last_close": None,
+                "pre_value": None, "pre_value_days": 0}
+
+    bars.sort()
+    last = bars[-1]
+    before = [b for b in bars if start_iso and b[0] < start_iso]
+    pre = before[-1] if before else None
+
+    vals = [b[2] for b in before[-value_days:] if b[2] is not None]
+    avg = round(sum(vals) / len(vals), 3) if vals else None
 
     return {
         "pre_close": round(pre[1], 4) if pre else None,
         "pre_close_date": pre[0] if pre else None,
-        "last_close": last[1] if last else None,
+        "last_close": last[1],
+        "pre_value": avg,
+        "pre_value_days": len(vals),
     }

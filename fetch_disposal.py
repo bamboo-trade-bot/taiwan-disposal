@@ -534,6 +534,7 @@ def attach_baseline(rows, today, log):
         r["pre_close"] = b["pre_close"] if b else None
         r["pre_close_date"] = b["pre_close_date"] if b else None
         r["last_close"] = b["last_close"] if b else None
+        r["pre_value"] = b["pre_value"] if b else None          # 億元
     return rows
 
 
@@ -580,6 +581,7 @@ def collect(start, end, today=None, log=None):
             r.setdefault("pre_close", None)
             r.setdefault("pre_close_date", None)
             r.setdefault("last_close", None)
+            r.setdefault("pre_value", None)
     return {
         "generated_at": taipei_now().isoformat(timespec="seconds"),
         "today": today.isoformat(),
