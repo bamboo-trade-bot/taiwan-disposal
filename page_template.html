@@ -131,6 +131,12 @@ table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
 /* 欄位多，視窗變窄時讓容器橫向捲動，不要把儲存格擠成好幾行高 */
 #live-table { min-width: 1000px; }
 #all-table { min-width: 1040px; }
+thead th.sortable { cursor: pointer; user-select: none; }
+thead th.sortable:hover { color: var(--ink); }
+thead th .sort-ind { margin-left: 5px; font-size: 9px; color: var(--ink-3); }
+thead th.sorted { color: var(--accent); }
+thead th.sorted .sort-ind { color: var(--accent); }
+
 thead th {
   position: sticky; top: 0; background: var(--panel-2); text-align: left;
   font-family: var(--f-mono); font-size: 11px; font-weight: 600; letter-spacing: .07em;
@@ -284,7 +290,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
 
     <div class="sec-head" style="margin-top:26px">
       <h2 style="font-size:17px">出關、處置中與即將開始的標的</h2>
-      <p>依狀態分組：<b>已出關／待出關 → 處置中（快解除的在前）→ 即將開始</b>。「待出關」為處置期已結束、但還沒到第一個可正常交易日（例如週五結束、週一才出關）。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。<span id="live-note"></span></p>
+      <p>預設依狀態分組：<b>已出關／待出關 → 處置中（快解除的在前）→ 即將開始</b>；點「處置期間」或「解除」可改依日期排序，再點一次反向，第三次回到分組。「待出關」為處置期已結束、但還沒到第一個可正常交易日（例如週五結束、週一才出關）。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。<span id="live-note"></span></p>
       <label class="toggle"><input type="checkbox" id="show-derivs"> 一併顯示權證與可轉債</label>
       <span class="qstamp" id="qstamp" hidden></span>
     </div>
@@ -296,7 +302,10 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
             <th class="q-col" hidden>報價</th>
             <th>較處置前</th>
             <th>層級</th><th class="num">撮合</th><th>預收款券</th>
-            <th>處置期間</th><th>解除</th>
+            <th class="sortable" data-sort="period" tabindex="0" role="button"
+                title="點擊依處置起算日排序">處置期間<span class="sort-ind"></span></th>
+            <th class="sortable" data-sort="release" tabindex="0" role="button"
+                title="點擊依出關日排序">解除<span class="sort-ind"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -725,20 +734,25 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     return td;
   }
 
-  function renderLive() {
-    var withDerivs = $("show-derivs").checked;
-    // 依 end 排序，今日出關的（處置迄日最早）自然排在最前面
-    // 先依狀態分組，組內再依日期。只依結束日排的話，即將開始的標的其結束日
-    // 會落在處置中那些標的之間，整份清單的狀態就被打散、掃不出來。
-    function rank(r) {
-      if (r.freed) return 0;
-      if (r.pending) return 1;
-      if (isUpcoming(r)) return 3;
-      return 2;                       // 處置中
-    }
-    var list = freed.concat(pending, live, soon)
-      .filter(function (r) { return withDerivs || r.type === "股票"; })
-      .sort(function (a, b) {
+  // ---------- 清單排序 ----------
+  // 預設依狀態分組。只依結束日排的話，即將開始的標的其結束日會落在處置中那些
+  // 標的之間，整份清單的狀態就被打散、掃不出來。
+  function rank(r) {
+    if (r.freed) return 0;
+    if (r.pending) return 1;
+    if (isUpcoming(r)) return 3;
+    return 2;                         // 處置中
+  }
+
+  var sortKey = null, sortDir = 1;    // null = 預設分組
+
+  function sortValue(r, key) {
+    return key === "period" ? (r.start || "") : (r.release || r.end || "");
+  }
+
+  function applySort(list) {
+    if (!sortKey) {
+      return list.sort(function (a, b) {
         var d = rank(a) - rank(b);
         if (d) return d;
         // 即將開始的看起算日，其餘看結束日
@@ -746,6 +760,37 @@ window.QUOTE_API = /*__QUOTE_API__*/;
         var kb = rank(b) === 3 ? (b.start || "") : (b.end || "");
         return ka.localeCompare(kb) || a.code.localeCompare(b.code);
       });
+    }
+    return list.sort(function (a, b) {
+      var d = sortValue(a, sortKey).localeCompare(sortValue(b, sortKey));
+      return (d || a.code.localeCompare(b.code)) * sortDir;
+    });
+  }
+
+  function paintSortHeaders() {
+    [].slice.call(document.querySelectorAll("#live-table th.sortable")).forEach(function (th) {
+      var on = sortKey === th.getAttribute("data-sort");
+      th.classList.toggle("sorted", on);
+      th.setAttribute("aria-sort", on ? (sortDir > 0 ? "ascending" : "descending") : "none");
+      th.querySelector(".sort-ind").textContent = on ? (sortDir > 0 ? "▲" : "▼") : "⇅";
+    });
+  }
+
+  function cycleSort(key) {
+    // 遞增 → 遞減 → 回到預設分組
+    if (sortKey !== key) { sortKey = key; sortDir = 1; }
+    else if (sortDir === 1) { sortDir = -1; }
+    else { sortKey = null; sortDir = 1; }
+    paintSortHeaders();
+    renderLive();
+    if (quotesStarted) pollQuotes();
+  }
+
+  function renderLive() {
+    var withDerivs = $("show-derivs").checked;
+    // 依 end 排序，今日出關的（處置迄日最早）自然排在最前面
+    var list = applySort(freed.concat(pending, live, soon)
+      .filter(function (r) { return withDerivs || r.type === "股票"; }));
 
     liveByKey = {};
     list.forEach(function (r) { liveByKey[quoteKey(r)] = r; });
@@ -812,6 +857,15 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     renderLive();
     if (quotesStarted) pollQuotes();     // 切換後新出現的列也要有報價
   });
+
+  [].slice.call(document.querySelectorAll("#live-table th.sortable")).forEach(function (th) {
+    var key = th.getAttribute("data-sort");
+    th.addEventListener("click", function () { cycleSort(key); });
+    th.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); cycleSort(key); }
+    });
+  });
+  paintSortHeaders();
   renderLive();
   startQuotes();
 
