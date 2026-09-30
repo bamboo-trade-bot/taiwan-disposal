@@ -14,3 +14,8 @@ venv/
 
 .DS_Store
 Thumbs.db
+
+# 回測產物
+bars_cache.json
+bars_cache.json.tmp
+backtest_events.json
