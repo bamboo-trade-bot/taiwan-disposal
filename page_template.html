@@ -177,6 +177,9 @@ td.dt { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); whit
   border: 1px solid var(--ink-2); border-radius: 2px; color: var(--ink-2);
 }
 
+#live-q { font-family: var(--f-mono); font-size: 12.5px; min-width: 150px; padding: 4px 8px; }
+.live-count { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-3); }
+
 .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
 .toggle input { accent-color: var(--accent); }
 
@@ -295,6 +298,9 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
       <h2 style="font-size:17px">出關、處置中與即將開始的標的</h2>
       <p>預設依狀態分組：<b>已出關／待出關 → 處置中（快解除的在前）→ 即將開始</b>；點「處置期間」或「解除」可改依日期排序，再點一次反向，第三次回到分組。「待出關」為處置期已結束、但還沒到第一個可正常交易日（例如週五結束、週一才出關）。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。<span id="live-note"></span></p>
       <label class="toggle"><input type="checkbox" id="show-derivs"> 一併顯示權證與可轉債</label>
+      <input type="search" id="live-q" placeholder="代號或名稱" autocomplete="off"
+             aria-label="在現況清單中搜尋代號或名稱">
+      <span class="live-count" id="live-count"></span>
       <span class="qstamp" id="qstamp" hidden></span>
     </div>
     <div class="tablewrap">
@@ -810,8 +816,14 @@ window.QUOTE_API = /*__QUOTE_API__*/;
   function renderLive() {
     var withDerivs = $("show-derivs").checked;
     // 依 end 排序，今日出關的（處置迄日最早）自然排在最前面
-    var list = applySort(freed.concat(pending, live, soon)
-      .filter(function (r) { return withDerivs || r.type === "股票"; }));
+    var q = $("live-q").value.trim().toLowerCase();
+    var base = freed.concat(pending, live, soon)
+      .filter(function (r) { return withDerivs || r.type === "股票"; });
+    var list = applySort(base.filter(function (r) {
+      return !q || (r.code + " " + r.name).toLowerCase().indexOf(q) >= 0;
+    }));
+    $("live-count").textContent = q ? (list.length + " / " + base.length + " 檔")
+                                    : (base.length + " 檔");
 
     liveByKey = {};
     list.forEach(function (r) { liveByKey[quoteKey(r)] = r; });
@@ -819,7 +831,8 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     lbody.innerHTML = "";
     if (!list.length) {
       var tr0 = el("tr");
-      var td0 = el("td", "", "今日沒有處置中的標的。");
+      // 搜尋沒中跟「今天真的沒有處置股」是兩回事，訊息不能寫死
+      var td0 = el("td", "", q ? "沒有符合「" + q + "」的標的。" : "今日沒有處置中的標的。");
       td0.colSpan = 12; td0.style.color = "var(--ink-2)"; td0.style.padding = "22px";
       tr0.appendChild(td0); lbody.appendChild(tr0);
       return;
@@ -879,6 +892,10 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     renderLive();
     if (quotesStarted) pollQuotes();     // 切換後新出現的列也要有報價
   });
+  $("live-q").addEventListener("input", function () {
+    renderLive();
+    if (quotesStarted) pollQuotes();
+  });
 
   [].slice.call(document.querySelectorAll("#live-table th.sortable")).forEach(function (th) {
     var key = th.getAttribute("data-sort");
@@ -887,6 +904,8 @@ window.QUOTE_API = /*__QUOTE_API__*/;
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); cycleSort(key); }
     });
   });
+  // 瀏覽器重新整理時會還原表單內容，若不清掉，開啟頁面就會是被過濾的空清單
+  $("live-q").value = "";
   paintSortHeaders();
   renderLive();
   startQuotes();
