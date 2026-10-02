@@ -72,10 +72,28 @@ jobs:
           python - <<'PY'
           import json
           d = json.load(open("_site/disposal_data.json", encoding="utf-8"))
-          n = len(d["rows"])
+          rows = d["rows"]
+          n = len(rows)
           print("rows:", n, "generated:", d["generated_at"])
           # 兩個來源都失效時 rows 會是 0，這種情況不要蓋掉線上還能用的舊版本
           assert n > 0, "沒有抓到任何公告，中止部署"
+
+          # 解析品質：來源改欄位時資料不會變少，只會整批變成空值。2026-10 櫃買
+          # 新增一欄「處置措施」導致後面每欄位移，上櫃的撮合與預收全部靜默失效，
+          # 線上掛了好幾天才被發現。這裡逐市場檢查，低於門檻就中止部署。
+          bad = []
+          for mk in ("上市", "上櫃"):
+              sub = [r for r in rows if r["market"] == mk]
+              if not sub:
+                  continue
+              ok = sum(1 for r in sub if r["interval_min"] is not None)
+              pct = 100.0 * ok / len(sub)
+              print("%s 撮合間隔解析率 %.1f%% (%d/%d)" % (mk, pct, ok, len(sub)))
+              if pct < 80:
+                  bad.append("%s 僅 %.1f%%" % (mk, pct))
+          if bad:
+              print("::error title=解析率過低::" + "；".join(bad) + "，來源欄位可能已變更")
+              raise SystemExit(1)
           PY
 
       - uses: actions/upload-pages-artifact@v3

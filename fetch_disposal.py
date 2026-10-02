@@ -121,6 +121,21 @@ LINK_RE = re.compile(r"\((?:\.{1,2}/|https?://)[^)]*\)")          # TPEx 欄位�
 TAG_RE = re.compile(r"<[^>]+>")
 
 
+def col_index(fields, *keywords):
+    """依欄位名稱找索引。
+
+    一律用名稱對應，不要寫死位置：2026-10 櫃買在「處置原因」後面插入一欄
+    「處置措施」，後面每一欄都位移一格，導致 detail 讀到的是「再次處置」
+    四個字而非公告全文，上櫃的撮合間隔、預收、天數、層級全部靜默失效。
+    """
+    for i, f in enumerate(fields or []):
+        name = (f or "").strip()
+        for kw in keywords:
+            if kw in name:
+                return i
+    return None
+
+
 def clean(s):
     if s is None:
         return ""
@@ -280,7 +295,8 @@ def reason_class(reason, detail):
 def round_no(measure, detail):
     """第幾次處置。上市有『處置措施』欄；上櫃需由內容推斷。"""
     t = (measure or "") + " " + (detail or "")
-    if "第二次處置" in t or "第2次處置" in t:
+    # 櫃買的「處置措施」欄用「再次處置」表示加重處置，不是「第二次處置」
+    if "第二次處置" in t or "第2次處置" in t or "再次處置" in t:
         return 2
     if "第一次處置" in t or "第1次處置" in t:
         return 1
@@ -295,17 +311,36 @@ def round_no(measure, detail):
 
 # ---------- 上市 ----------
 
+def _pick(fields):
+    """把欄位名稱對應成索引，供兩個市場共用。"""
+    return {
+        "ann": col_index(fields, "公布日"),
+        "code": col_index(fields, "代號"),
+        "name": col_index(fields, "名稱"),
+        "cum": col_index(fields, "累計"),
+        "period": col_index(fields, "起訖", "起迄"),
+        "reason": col_index(fields, "處置原因", "處置條件"),
+        "measure": col_index(fields, "處置措施"),
+        "detail": col_index(fields, "處置內容"),
+        "close": col_index(fields, "收盤價"),
+    }
+
+
+def _get(row, idx):
+    return row[idx] if idx is not None and idx < len(row) else ""
+
+
 def fetch_twse(start, end):
     rows, seen = [], set()
     for a, b in month_chunks(start, end):
         d = get_json(TWSE_URL.format(a=a.strftime("%Y%m%d"), b=b.strftime("%Y%m%d")))
+        ix = _pick(d.get("fields"))
         for r in (d.get("data") or []):
-            r = list(r) + [""] * (10 - len(r))
-            code = clean(r[2])
+            code = clean(_get(r, ix["code"]))
             if not code:
                 continue
-            ann = roc_to_iso(r[1])
-            period = clean(r[6])
+            ann = roc_to_iso(_get(r, ix["ann"]))
+            period = clean(_get(r, ix["period"]))
             key = (ann, code, period)
             if key in seen:
                 continue
@@ -315,15 +350,15 @@ def fetch_twse(start, end):
                 "market": "上市",
                 "announce_date": ann,
                 "code": code,
-                "name": clean(r[3]),
-                "cumulative": to_int(r[4]),
-                "reason_raw": clean(r[5]),
+                "name": clean(_get(r, ix["name"])),
+                "cumulative": to_int(_get(r, ix["cum"])),
+                "reason_raw": clean(_get(r, ix["reason"])),
                 "period_raw": period,
                 "start": s,
                 "end": e,
-                "measure_raw": clean(r[7]),
-                "detail": clean(r[8]),
-                "close": None,
+                "measure_raw": clean(_get(r, ix["measure"])),
+                "detail": clean(_get(r, ix["detail"])),
+                "close": to_float(_get(r, ix["close"])),
                 "pe": None,
             })
     return rows
@@ -337,13 +372,13 @@ def fetch_tpex(start, end):
         d = get_json(TPEX_URL.format(a=a.strftime("%Y/%m/%d"), b=b.strftime("%Y/%m/%d")),
                      referer=TPEX_REFERER)
         for table in (d.get("tables") or []):
+            ix = _pick(table.get("fields"))
             for r in (table.get("data") or []):
-                r = list(r) + [""] * (11 - len(r))
-                code = clean(r[2])
+                code = clean(_get(r, ix["code"]))
                 if not code:            # 表格內的空白/註腳列
                     continue
-                ann = roc_to_iso(r[1])
-                period = clean(r[5])
+                ann = roc_to_iso(_get(r, ix["ann"]))
+                period = clean(_get(r, ix["period"]))
                 key = (ann, code, period)
                 if key in seen:
                     continue
@@ -353,16 +388,16 @@ def fetch_tpex(start, end):
                     "market": "上櫃",
                     "announce_date": ann,
                     "code": code,
-                    "name": clean(r[3]),
-                    "cumulative": to_int(r[4]),
-                    "reason_raw": clean(r[6]),
+                    "name": clean(_get(r, ix["name"])),
+                    "cumulative": to_int(_get(r, ix["cum"])),
+                    "reason_raw": clean(_get(r, ix["reason"])),
                     "period_raw": period,
                     "start": s,
                     "end": e,
-                    "measure_raw": "",
-                    "detail": clean(r[7]),
-                    "close": to_float(r[8]),
-                    "pe": to_float(r[9]),
+                    "measure_raw": clean(_get(r, ix["measure"])),
+                    "detail": clean(_get(r, ix["detail"])),
+                    "close": to_float(_get(r, ix["close"])),
+                    "pe": None,
                 })
     return rows
 
