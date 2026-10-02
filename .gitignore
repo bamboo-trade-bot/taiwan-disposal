@@ -18,4 +18,7 @@ Thumbs.db
 # 回測產物
 bars_cache.json
 bars_cache.json.tmp
+bars_ohlc_cache.json
+bars_ohlc_cache.json.tmp
 backtest_events.json
+grid_result.json
