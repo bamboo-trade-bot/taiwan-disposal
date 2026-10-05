@@ -217,7 +217,7 @@ td.dt { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); whit
 .dd .ddp.flat { color: var(--ink-3); font-weight: 500; }
 .dd .ddh { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 
-/* 前 5 日均成交值不足 1 億：盤子薄，處置期間更難進出 */
+/* 前 5 日均成交值不足 10 億：盤子薄，處置期間更難進出 */
 .thin-value { color: var(--up); font-weight: 600; }
 
 /* 同時受多張處置公告拘束 */
@@ -310,7 +310,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
             <th>市場</th><th>代號</th><th>名稱</th><th>類型</th>
             <th class="q-col" hidden>報價</th>
             <th>較處置前</th>
-            <th class="num" title="進處置前 5 個交易日的成交金額平均，單位億元；低於 1 億以紅字標示">前5日均額</th>
+            <th class="num" title="進處置前 5 個交易日的成交金額平均，單位億元；低於 10 億以紅字標示">前5日均額</th>
             <th>層級</th><th class="num">撮合</th><th>預收款券</th>
             <th class="sortable" data-sort="period" tabindex="0" role="button"
                 title="點擊依處置起算日排序">處置期間<span class="sort-ind"></span></th>
@@ -735,9 +735,9 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     setInterval(function () { if (inSession()) pollQuotes(); }, 15000);
   }
 
-  // 進處置前 5 個交易日的成交金額平均（億元）。低於 1 億代表盤子很薄，
+  // 進處置前 5 個交易日的成交金額平均（億元）。低於 10 億代表盤子偏薄，
   // 處置期間人工撮合又更難成交，所以用紅字標出來。
-  var THIN_VALUE = 1;
+  var THIN_VALUE = 10;
 
   function valueCell(r) {
     var td = el("td", "num");
@@ -747,7 +747,7 @@ window.QUOTE_API = /*__QUOTE_API__*/;
     }
     var thin = r.pre_value < THIN_VALUE;
     var s = el("span", thin ? "thin-value" : "", r.pre_value.toFixed(2) + " 億");
-    if (thin) s.title = "進處置前 5 日均成交值不足 1 億，流動性偏薄";
+    if (thin) s.title = "進處置前 5 日均成交值不足 10 億，流動性偏薄";
     td.appendChild(s);
     return td;
   }
