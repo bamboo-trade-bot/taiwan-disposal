@@ -296,7 +296,7 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
 
     <div class="sec-head" style="margin-top:26px">
       <h2 style="font-size:17px">出關、處置中與即將開始的標的</h2>
-      <p>預設依狀態分組：<b>已出關／待出關 → 處置中（快解除的在前）→ 即將開始</b>；點「處置期間」或「解除」可改依日期排序，再點一次反向，第三次回到分組。「待出關」為處置期已結束、但還沒到第一個可正常交易日（例如週五結束、週一才出關）。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。<span id="live-note"></span></p>
+      <p>預設依狀態分組：<b>已出關／待出關 → 處置中（快解除的在前）→ 即將開始</b>；點「前5日均額」「處置期間」「解除」可改依該欄排序，再點一次反向，第三次回到分組。「待出關」為處置期已結束、但還沒到第一個可正常交易日（例如週五結束、週一才出關）。同一檔若有多張重疊公告則合併為一列，並取其中最嚴格的措施。<span id="live-note"></span></p>
       <label class="toggle"><input type="checkbox" id="show-derivs"> 一併顯示權證與可轉債</label>
       <input type="search" id="live-q" placeholder="代號或名稱" autocomplete="off"
              aria-label="在現況清單中搜尋代號或名稱">
@@ -310,7 +310,8 @@ footer p { margin: 0 0 6px; max-width: 78ch; }
             <th>市場</th><th>代號</th><th>名稱</th><th>類型</th>
             <th class="q-col" hidden>報價</th>
             <th>較處置前</th>
-            <th class="num" title="進處置前 5 個交易日的成交金額平均，單位億元；低於 10 億以紅字標示">前5日均額</th>
+            <th class="num sortable" data-sort="value" tabindex="0" role="button"
+                title="進處置前 5 個交易日的成交金額平均，單位億元；低於 10 億以紅字標示。點擊依金額排序">前5日均額<span class="sort-ind"></span></th>
             <th>層級</th><th class="num">撮合</th><th>預收款券</th>
             <th class="sortable" data-sort="period" tabindex="0" role="button"
                 title="點擊依處置起算日排序">處置期間<span class="sort-ind"></span></th>
@@ -774,7 +775,9 @@ window.QUOTE_API = /*__QUOTE_API__*/;
   var sortKey = null, sortDir = 1;    // null = 預設分組
 
   function sortValue(r, key) {
-    return key === "period" ? (r.start || "") : (r.release || r.end || "");
+    if (key === "period") return r.start || "";
+    if (key === "release") return r.release || r.end || "";
+    return r.pre_value;                 // 數值，可能是 null
   }
 
   function applySort(list) {
@@ -788,8 +791,18 @@ window.QUOTE_API = /*__QUOTE_API__*/;
         return ka.localeCompare(kb) || a.code.localeCompare(b.code);
       });
     }
+    var numeric = sortKey === "value";
     return list.sort(function (a, b) {
-      var d = sortValue(a, sortKey).localeCompare(sortValue(b, sortKey));
+      var va = sortValue(a, sortKey), vb = sortValue(b, sortKey), d;
+      if (numeric) {
+        // 沒有數值的一律沉到最後，不隨升降序翻到最上面
+        if (va == null && vb == null) d = 0;
+        else if (va == null) return 1;
+        else if (vb == null) return -1;
+        else d = va - vb;
+      } else {
+        d = String(va).localeCompare(String(vb));
+      }
       return (d || a.code.localeCompare(b.code)) * sortDir;
     });
   }
