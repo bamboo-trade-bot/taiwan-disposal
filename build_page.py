@@ -19,7 +19,8 @@ QUOTE_PLACEHOLDER = "/*__QUOTE_API__*/"
 KEEP = ["market", "announce_date", "code", "name", "type", "reason", "round",
         "interval_min", "days", "start", "end", "active", "upcoming",
         "cumulative", "prepay", "prepay_note", "release", "has_future",
-        "pre_close", "pre_close_date", "last_close", "pre_value", "detail"]
+        "pre_close", "pre_close_date", "last_close", "pre_value",
+        "extended", "end_announced", "detail"]
 DETAIL_CHARS = 180
 
 
@@ -38,6 +39,7 @@ def slim(payload):
         "today": payload["today"],
         "calendar_ok": payload.get("calendar_ok", False),
         "holidays": payload.get("holidays", []),
+        "closures": payload.get("closures", []),
         "range": payload["range"],
         "rows": rows,
     }

@@ -169,6 +169,7 @@ td.dt { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); whit
 .pill.pay-cond { border-style: dotted; }
 .pill.freed { border-color: var(--good); color: var(--good); font-weight: 600; }
 .pill.pending { border-color: var(--good); border-style: dashed; color: var(--good); }
+.pill.ext { border-color: var(--accent); color: var(--accent); }
 
 /* 股期標記：處置期間現股受限，有股期就還有連續交易的工具 */
 .fut {
@@ -864,7 +865,15 @@ window.QUOTE_API = /*__QUOTE_API__*/;
       tr.appendChild(el("td", "num", intervalText(r)));
       tr.appendChild(payCell(r));
 
-      tr.appendChild(el("td", "dt", roc(r.start) + " – " + roc(r.end)));
+      var tdP = el("td", "dt", roc(r.start) + " – " + roc(r.end));
+      if (r.extended) {
+        // 期間內遇颱風假等臨時休市，處置順延；公告上的迄日不會更新
+        var ext = el("span", "pill ext", "順延 " + r.extended + " 日");
+        ext.title = "處置期間內遇臨時休市，依規定順延執行。公告原訂迄日 " + roc(r.end_announced);
+        tdP.appendChild(document.createTextNode(" "));
+        tdP.appendChild(ext);
+      }
+      tr.appendChild(tdP);
 
       var tdRel = el("td");
       var box = el("div", "rel");

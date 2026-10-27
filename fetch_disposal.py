@@ -50,6 +50,8 @@ TPEX_REFERER = "https://www.tpex.org.tw/zh-tw/announce/market/disposal.html"
 HOLIDAY_URL = ("https://www.twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule"
                "?response=json&queryYear={roc}")
 TAIFEX_URL = "https://www.taifex.com.tw/cht/2/stockLists"
+# 每日市場成交資訊，一個交易日一列；用來反推實際有開市的日子
+FMTQIK_URL = "https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={ym}01&response=json"
 
 
 def _ssl_context():
@@ -430,6 +432,88 @@ def fetch_holidays(years, log):
     return days, ok
 
 
+MAX_CLOSURES = 8        # 一年內臨時休市超過這個數就當成資料有問題
+
+
+def fetch_closures(start, today, holidays, log):
+    """臨時休市日（颱風假等）：平日、不在休市日曆、但實際沒有開市。
+
+    處置公告寫明「如遇休市……則順延執行」，但颱風假不會出現在年度休市日曆，
+    交易所也不會重發公告——2026-10-23 颱風休市，4979 等處置股實際順延一日，
+    頁面卻照原迄日算成提早一天出關。只能事後從實際交易日反推。
+
+    只認「查詢成功」的月份，否則一個月抓失敗就會整月被當成休市；也只看今天
+    以前的日子，今天收盤前當然還查不到。
+    """
+    traded, ok_months = set(), set()
+    for a, _b in month_chunks(start, today):
+        try:
+            d = get_json(FMTQIK_URL.format(ym=a.strftime("%Y%m")))
+        except Exception as e:
+            log("trading days %s unavailable: %s" % (a.strftime("%Y-%m"), e))
+            continue
+        data = d.get("data") or []
+        if not data:
+            continue
+        ok_months.add((a.year, a.month))
+        for r in data:
+            iso = roc_to_iso(r[0])
+            if iso:
+                traded.add(iso)
+
+    closures = set()
+    d = start
+    while d < today:
+        iso = d.isoformat()
+        if (d.weekday() < 5 and (d.year, d.month) in ok_months
+                and iso not in holidays and iso not in traded):
+            closures.add(iso)
+        d += dt.timedelta(days=1)
+
+    if len(closures) > MAX_CLOSURES:
+        log("unscheduled closures look wrong (%d days), ignored" % len(closures))
+        return set()
+    log("unscheduled closures: %s" % (", ".join(sorted(closures)) or "none"))
+    return closures
+
+
+def _count_trading_days(a, b, off_days):
+    x, n = dt.date.fromisoformat(a), 0
+    last = dt.date.fromisoformat(b)
+    while x <= last:
+        if x.weekday() < 5 and x.isoformat() not in off_days:
+            n += 1
+        x += dt.timedelta(days=1)
+    return n
+
+
+def shift_for_closures(start, end, days, closures, off_days):
+    """依臨時休市順延處置期間，回傳 (實際起算日, 實際迄日, 順延天數)。
+
+    判斷標準是「公告計算迄日時有沒有扣掉這天」，不是「年度日曆有沒有列」：
+    2025-12-25 行憲紀念日不在 2025 年度日曆裡（修法晚於日曆發布），但事前已
+    公告休市，處置公告的迄日早已跳過它——若照樣順延，那附近的處置會多延一天。
+    颱風假則是前一晚才決定，公告來不及扣。
+
+    所以用公告寫明的營業日數 N 對照：期間內實際交易日少於 N 天才順延，且順延
+    天數不超過期間內的臨時休市天數（營業日數若解析錯，也不會亂延）。
+    """
+    if not (start and end):
+        return start, end, 0
+    k = sum(1 for c in closures if start <= c <= end)      # 期間內的臨時休市
+    if not k:
+        return start, end, 0
+    if days:
+        n = min(k, max(0, days - _count_trading_days(start, end, off_days)))
+    else:
+        n = k                                               # 沒有營業日數可對照
+    e = end
+    for _ in range(n):
+        e = next_trading_day(e, off_days)
+    s = next_trading_day(start, off_days) if (n and start in closures) else start
+    return s, e, n
+
+
 def next_trading_day(iso, holidays):
     """處置期滿後第一個可正常交易的日子。"""
     if not iso:
@@ -501,17 +585,24 @@ def month_chunks(start, end):
     return out
 
 
-def enrich(rows, today, holidays=None, futures=None):
+def enrich(rows, today, holidays=None, futures=None, closures=None):
     holidays = holidays or set()
     futures = futures or set()
+    closures = closures or set()
+    off_days = holidays | closures
     for r in rows:
-        r["release"] = next_trading_day(r["end"], holidays)   # 出關日
+        # 遇臨時休市順延；之後所有狀態判定與出關日都以實際期間為準。
+        # 營業日數要先解析出來，順延判斷靠它對照。
+        r["days"] = disposal_days(r["detail"])
+        r["start_announced"], r["end_announced"] = r["start"], r["end"]
+        r["start"], r["end"], r["extended"] = shift_for_closures(
+            r["start"], r["end"], r["days"], closures, off_days)
+        r["release"] = next_trading_day(r["end"], off_days)   # 出關日
         r["has_future"] = r["code"] in futures
         r["type"] = sec_type(r["code"], r["name"])
         r["reason"] = reason_class(r["reason_raw"], r["detail"])
         r["round"] = round_no(r["measure_raw"], r["detail"])
         r["interval_min"] = match_interval(r["detail"])
-        r["days"] = disposal_days(r["detail"])
         r["active"] = bool(r["start"] and r["end"] and r["start"] <= today <= r["end"])
         r["upcoming"] = bool(r["start"] and r["start"] > today)
         # 預收規定要在截短前判定，門檻條款位在公告後段，截掉就會誤判成「全面」
@@ -603,10 +694,12 @@ def collect(start, end, today=None, log=None):
     log("TPEx %d rows" % len(tpex))
 
     # 出關日要跳過國定假日，涵蓋今年與明年（明年的行事曆通常年底才公布）
-    holidays, calendar_ok = fetch_holidays([today.year, today.year + 1], log)
+    # 涵蓋資料區間內每一年，否則去年的年度假日會被誤判成臨時休市
+    holidays, calendar_ok = fetch_holidays(list(range(start.year, today.year + 2)), log)
+    closures = fetch_closures(start, today, holidays, log)
     futures = fetch_stock_futures(log)
 
-    rows = enrich(twse + tpex, today.isoformat(), holidays, futures)
+    rows = enrich(twse + tpex, today.isoformat(), holidays, futures, closures)
     # 基準價是加值資訊，不該有能力弄垮整個建置：失敗就少一欄，核心資料照常產出
     try:
         attach_baseline(rows, today, log)
@@ -623,7 +716,8 @@ def collect(start, end, today=None, log=None):
         "calendar_ok": calendar_ok,
         # 休市日清單給前端：頁面以瀏覽器當下的台北日期判定處置狀態，
         # 不沿用建置當下的日期，否則排程一延遲就整頁停在昨天。
-        "holidays": sorted(holidays),
+        "holidays": sorted(holidays | closures),
+        "closures": sorted(closures),
         "range": {"start": start.isoformat(), "end": end.isoformat()},
         "sources": {
             "listed": "https://www.twse.com.tw/zh/announcement/punish.html",
